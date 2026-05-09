@@ -508,7 +508,7 @@ for {set idx $startIdx} {$idx <= $endIdx} {incr idx} {
   say "Stage $s"
   switch -- $s {
     "T1_load_state"         { stage_T1_load_state         $dryrun state }
-    "T2_verify_connectivity"{ stage_T2_verify_connectivity $dryrun state }
+    "T2_verify_connectivity" { stage_T2_verify_connectivity $dryrun state }
     "T3_stop_registry"      { stage_T3_stop_registry       $dryrun state }
     "T4_reset_passwords"    { stage_T4_reset_passwords     $dryrun state }
     "T5_reset_hostnames"    { stage_T5_reset_hostnames     $dryrun state }
