@@ -297,10 +297,17 @@ proc tpi_flash_node {node_idx img_or_local} {
   }
   say "  spawn: [join $cmd { }]"
   set timeout 1800
+  set output ""
   spawn {*}$cmd
-  expect eof
+  expect {
+    -re "Error occured.*" { append output $expect_out(0,string); exp_continue }
+    eof {}
+  }
   lassign [wait] pid spawnid os_err exit_code
-  if {$exit_code != 0} { die "tpi flash node $node_idx failed (exit $exit_code)" }
+  # tpi 1.0.x exits 0 even on flash errors — check output as a fallback
+  if {$exit_code != 0 || [string match "*Error occured*" $output]} {
+    die "tpi flash node $node_idx failed: [string trim $output]"
+  }
 }
 
 # Return the manifest image type for a given node (download mode).
@@ -408,7 +415,8 @@ proc discover_nodes {subnet} {
   set ips {}
   set out [sh "nmap -sn $subnet | grep 'Nmap scan report for'"]
   foreach line [split $out "\n"] {
-    if {[regexp {Nmap scan report for ([\d\.]+)} $line -> ip]} { lappend ips $ip }
+    if {[regexp {Nmap scan report for \S+ \(([\d\.]+)\)} $line -> ip]} { lappend ips $ip } \
+    elseif {[regexp {Nmap scan report for ([\d\.]+)} $line -> ip]} { lappend ips $ip }
   }
   set good {}
   foreach ip $ips {
