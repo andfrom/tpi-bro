@@ -7,16 +7,16 @@ Ordered roughly by dependency / priority. Items with `[BLOCKED]` cannot start un
 ## Phase A — Bootstrap Polish
 
 ### A-01: Replace `tpi_power` placeholder with real `tpi` CLI calls
-**Status:** TODO  
-The Expect script has stub `tpi_power` calls in A2 and A4. Replace with real `exec tpi power on -n $node` / `exec tpi power off` wrapped in `expect` to confirm completion before proceeding to the next step.
+**Status:** DONE  
+`tpi_power` uses `exec {*}$args` with proper list construction; passes `--host $BMC_HOST` when set. A2 calls `tpi power off` (all nodes). A4 calls `tpi power on -n $i` per node. Discovery uses event-driven deadline loops — no fixed sleeps.
 
 ### A-02: Write teardown script
 **Status:** DONE (`teardown-cluster.exp`)  
 Stages T1–T8: load state → verify SSH → stop registry → reset passwords → reset hostnames → clean /etc/hosts → graceful poweroff + tpi → archive state. Flags: `--dry-run`, `--remove-docker`, `--keep-hostname`, `--from`/`--to`, `--password`.
 
 ### A-03: Dry-run for all stages (not just Phase A)
-**Status:** TODO  
-Verify `--dry-run` mode works correctly for each stage and produces useful output showing what *would* happen.
+**Status:** DONE  
+`--dry-run` verified across all bootstrap stages (Phase A), `--rediscover`, and all teardown stages (T1–T8). All produce meaningful output.
 
 ### A-04: CI / automated test for Phase A dry-run
 **Status:** TODO  

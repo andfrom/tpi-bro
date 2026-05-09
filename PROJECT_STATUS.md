@@ -14,17 +14,17 @@ tpi-bro bootstraps a TuringPi 2 board (4× RK1 ARM64 compute modules) from bare 
 
 | Stage | Name | Status | Notes |
 |-------|------|--------|-------|
-| A1 | find_bmc | Done | nmap scan + manual fallback |
-| A2 | poweroff_all | Done (stub) | `tpi power off` — placeholder, works but not fully integrated |
+| A1 | find_bmc | Done | nmap scan + manual fallback; pins `turingpi.local` in `/etc/hosts`; extracts BMC MAC |
+| A2 | poweroff_all | Done | Real `tpi power off` via exec; no artificial sleeps |
 | A3 | flash_optional | Done (stub) | USB/web flash stubs; skip is default |
-| A4 | power_on_and_discover | Done | Powers on nodes one-by-one, discovers IPs |
-| A5 | name_password_reboot | Done | Sets hostname + password via SSH |
-| A6 | write_hosts_on_laptop | Done | Fixed; uses bootstrap-host-helper.sh |
+| A4 | power_on_and_discover | Done | Real `tpi power on -n N`; delta-based IP discovery; MAC extraction; DHCP reservation summary |
+| A5 | name_password_reboot | Done | Sets hostname + password via SSH; event-driven reboot wait |
+| A6 | write_hosts_on_laptop | Done | Appends node IP↔hostname to `/etc/hosts` via bootstrap-host-helper.sh |
 | A7 | ephemeral_registry_phaseA | Done | Docker registry:2, HTTP, port 5000, restart=always |
 
-**Known issues / open items:**
-- A2/A4 use `tpi power` via shell exec but not fully wrapped with `expect` output confirmation
-- Teardown script not yet written (backlog item A-02)
+**`--rediscover` mode:** Done — scans subnet, identifies nodes by SSH hostname, updates state + `/etc/hosts`. No power cycling.
+
+**Teardown script (`teardown-cluster.exp`):** Done — T1–T8 stages; DHCP-resilient node location in T1; graceful poweroff + tpi hard-off in T7; symmetric `/etc/hosts` cleanup in T6.
 
 ---
 

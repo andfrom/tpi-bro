@@ -64,6 +64,7 @@ The Expect script is designed to be:
 - **Dry-run capable**: see what would happen with `--dry-run`
 - **Mode-aware**: choose flashing mode `--flash usb|web|skip`<br>(note: not all USB ports can manage [USB OTG](https://en.wikipedia.org/wiki/USB_On-The-Go) or you might have reasons to use the Web UI...)
 - **Stateful**: discoveries are saved to `bootstrap-state.kv`
+- **Rediscoverable**: `--rediscover` re-scans the subnet after DHCP reassignment, with no power cycling
 
 ---
 
@@ -109,7 +110,7 @@ The BMC is reachable at `turingpi.local` by default (mDNS). This works over both
 
 #### `sudo` access on your laptop
 
-Stage A6 updates `/etc/hosts` on your laptop. The helper script (`bootstrap-host-helper.sh`) uses `sudo` for this. You will be prompted once.
+Stages A1 and A6 update `/etc/hosts` on your laptop (A1 pins the BMC, A6 pins the nodes). The helper script (`bootstrap-host-helper.sh`) uses `sudo` for both. You will be prompted if your sudo session has expired.
 
 ---
 
@@ -117,16 +118,17 @@ Stage A6 updates `/etc/hosts` on your laptop. The helper script (`bootstrap-host
 
 | File | Purpose |
 |------|---------|
-| `bootstrap-turingpi-cluster.exp` | Main Expect script (staged, resumable) |
-| `bootstrap-host-helper.sh` | Idempotently appends entries to `/etc/hosts` |
-| `bootstrap-state.kv` | Generated state file with discovered IP↔hostname mappings (gitignored) |
+| `bootstrap-turingpi-cluster.exp` | Main bootstrap Expect script (staged, resumable, `--rediscover` mode) |
+| `teardown-cluster.exp` | Reverses Phase A — resets nodes to a re-bootstrappable state |
+| `bootstrap-host-helper.sh` | Manages `/etc/hosts` entries (`hosts-append` / `hosts-remove`) |
+| `bootstrap-state.kv` | Generated state file — discovered IPs, MACs, BMC address (gitignored) |
 | `gen-registry-certs.sh` | Generates TLS certificates for the Phase B registry |
 | `registry-chart/` | Helm chart for the persistent Phase B registry |
 
 Make the scripts executable:
 
 ```bash
-chmod +x bootstrap-turingpi-cluster.exp bootstrap-host-helper.sh gen-registry-certs.sh
+chmod +x bootstrap-turingpi-cluster.exp teardown-cluster.exp bootstrap-host-helper.sh gen-registry-certs.sh
 ```
 
 ---
@@ -171,21 +173,51 @@ chmod +x bootstrap-turingpi-cluster.exp bootstrap-host-helper.sh gen-registry-ce
 ./bootstrap-turingpi-cluster.exp --phase A --flash web    # placeholder
 ```
 
+#### Fix IP drift without re-running Phase A
+
+If DHCP has reassigned node IPs since the last run (e.g. after WiFi dropped), use `--rediscover`. It scans the subnet, identifies each node by its SSH hostname, and rewrites `/etc/hosts` and `bootstrap-state.kv` with the new IPs. No power cycling, no password changes.
+
+```bash
+./bootstrap-turingpi-cluster.exp --rediscover
+./bootstrap-turingpi-cluster.exp --dry-run --rediscover   # preview only
+```
+
 ---
 
 ### Expect Script Stages ("Phase A")
 
 | Stage | Name | What it does |
 |-------|------|--------------|
-| A1 | `find_bmc` | Discover the BMC via `nmap`, or enter IP manually |
+| A1 | `find_bmc` | Discover BMC via `nmap` or manual entry; pin `turingpi.local` in `/etc/hosts`; extract BMC MAC |
 | A2 | `poweroff_all` | Power OFF all RK1 nodes via `tpi power off` |
 | A3 | `flash_optional` | Optional flash (USB/web stubs — hardware-specific) |
-| A4 | `power_on_and_discover` | Power nodes on one-by-one; discover their IPs via SSH probing |
+| A4 | `power_on_and_discover` | Power nodes on one-by-one; discover IPs via delta scan; extract MACs; print DHCP reservation summary |
 | A5 | `name_password_reboot` | Change password, set hostnames (`rk1-node{1..4}`), reboot |
-| A6 | `write_hosts_on_laptop` | Append IP↔hostname to laptop `/etc/hosts` |
+| A6 | `write_hosts_on_laptop` | Append node IP↔hostname entries to laptop `/etc/hosts` |
 | A7 | `ephemeral_registry_phaseA` | Install Docker on node1; start `registry:2` (HTTP, `--restart=always`) |
 
-Each stage is written with check→act logic where practical, so reruns should be safe.
+Each stage is written with check→act logic where practical, so reruns are safe.
+
+---
+
+### DHCP and IP stability
+
+DHCP does not guarantee stable IPs. After a power cycle or network interruption, nodes may get different addresses, breaking SSH and `kubectl` access.
+
+**The right fix: static DHCP reservations.** When A4 completes it prints a table like:
+
+```
+DHCP reservation summary — configure in your router for stable IPs:
+  rk1-node1  MAC=dc:a6:32:xx:xx:xx  →  192.168.1.115
+  rk1-node2  MAC=dc:a6:32:xx:xx:xx  →  192.168.1.240
+  rk1-node3  MAC=dc:a6:32:xx:xx:xx  →  192.168.1.166
+  rk1-node4  MAC=dc:a6:32:xx:xx:xx  →  192.168.1.93
+  turingpi (BMC)  MAC=xx:xx:xx:xx:xx:xx  →  192.168.1.163
+```
+
+Enter these MAC→IP bindings in your router's DHCP reservation settings. Once done, IPs are stable across reboots and `--rediscover` is rarely needed.
+
+**If you can't set DHCP reservations** (e.g. a managed office network), run `--rediscover` any time IPs drift. It identifies nodes by hostname over SSH — not by stored IP — so it works regardless of what DHCP assigned.
 
 ---
 
@@ -204,37 +236,96 @@ Open `bootstrap-turingpi-cluster.exp` and adjust the config block near the top:
 | `REGISTRY_NODE_IDX` | `1` | Which node hosts the registry |
 | `REGISTRY_PORT` | `5000` | Registry port |
 | `FLASH_MODE` | `skip` | `usb` / `web` / `skip` |
+| `BMC_HOST` | _(auto)_ | Set by A1; passed to `tpi` as `--host` when `turingpi.local` mDNS isn't yet available |
 
 ---
 
 ### Troubleshooting
 
-**BMC not found at `turingpi.local`:**
-1. Check that your laptop and the TuringPi board are on the same network segment.
-2. Try `ping turingpi.local` — if it fails, mDNS is broken.
-3. Run `nmap -sn 192.168.1.0/24` and look for the TuringPi in the output.
-4. Check your router's DHCP table for a device named `turingpi`.
-5. As a last resort, connect an Ethernet cable directly between your laptop and the board's Ethernet port.
+**BMC not found / `turingpi.local` not resolving:**
 
-**Node IPs changed after power cycle:**
-DHCP leases may not be stable. If you get SSH connection failures after a reboot, rerun from A4:
+mDNS (`turingpi.local`) is unreliable on some WiFi networks. Once Phase A has run once, this is no longer an issue — A1 pins the BMC IP in `/etc/hosts` so `tpi` always resolves it. Before Phase A has run, find the BMC manually:
+
 ```bash
-./bootstrap-turingpi-cluster.exp --from A4_power_on_and_discover
+nmap -sn 192.168.1.0/24     # look for host named "turingpi"
+tpi --host <ip> power status # use the discovered IP explicitly
 ```
 
+A1 will then run `tpi` with that IP and pin it. Subsequent stages and reruns use `/etc/hosts` — no mDNS dependency.
+
+**Node IPs changed after power cycle:**
+
+Set static DHCP reservations using the MAC table printed by A4 (see [DHCP and IP stability](#dhcp-and-ip-stability) above). If IPs have already drifted, run:
+
+```bash
+./bootstrap-turingpi-cluster.exp --rediscover
+```
+
+This scans the subnet, identifies nodes by SSH hostname, and updates both `/etc/hosts` and the state file. No power cycling.
+
+**tpi authentication fails / "no such device" error:**
+
+`tpi` needs an interactive terminal to prompt for BMC credentials on first use. Run it once from your normal terminal:
+
+```bash
+tpi power status    # or: tpi --host <bmc-ip> power status
+```
+
+Credentials are cached in `~/.cache/tpi_token` and all subsequent calls (including from the bootstrap script) work without a TTY.
+
 **Registry not reachable after push:**
-The Phase A registry is HTTP-only. You must add `rk1-node1:5000` to Docker's `insecure-registries` on your laptop:
+
+The Phase A registry is HTTP-only. Add `rk1-node1:5000` to Docker's `insecure-registries` on your laptop:
 ```json
-// /etc/docker/daemon.json
-{
-  "insecure-registries": ["rk1-node1:5000"]
-}
+{ "insecure-registries": ["rk1-node1:5000"] }
 ```
 Then `sudo systemctl restart docker`.
 
-**SSH/hostnames:** If discovery is flaky, you can pre-fill IPs → names in `bootstrap-state.kv`, then rerun from a later stage.
+**Reruns:** Safe to rerun with `--from <stage>` after fixing whatever failed.
 
-**Reruns:** Safe to rerun with `--from <stage>` after you fix whatever failed.
+---
+
+---
+
+## Teardown
+
+`teardown-cluster.exp` reverses Phase A cleanly — useful for scratch-reinstall testing or decommissioning. It resets every node to a re-bootstrappable state (default credentials, no registry, hostnames reset) and powers them all off.
+
+### Why a separate teardown script?
+
+The bootstrap is intentionally forward-only (idempotent stages, check→act). Teardown runs in the opposite direction with different concerns — it must locate nodes even when IPs have drifted, and it must succeed even if parts of Phase A were never completed.
+
+### Teardown stages
+
+| Stage | Name | What it does |
+|-------|------|--------------|
+| T1 | `load_state` | Load state; verify each node IP is live; scan subnet by hostname if IPs drifted |
+| T2 | `verify_connectivity` | Report resolved IP for each node |
+| T3 | `stop_registry` | Stop and remove the `registry:2` container on node1 |
+| T4 | `reset_passwords` | Reset all node passwords to `ubuntu:ubuntu` |
+| T5 | `reset_hostnames` | Reset hostnames to `ubuntu`; remove `127.0.1.1 rk1-nodeN` from node `/etc/hosts` |
+| T6 | `clean_laptop_hosts` | Remove `rk1-node{1..4}` and `turingpi.local` from laptop `/etc/hosts` |
+| T7 | `poweroff_nodes` | Graceful `sudo poweroff` per node; waits for SSH to drop; BMC `tpi power off` |
+| T8 | `clear_state` | Archive `bootstrap-state.kv` with a timestamp |
+
+### Teardown usage
+
+```bash
+./teardown-cluster.exp                    # full teardown (prompts for current node password)
+./teardown-cluster.exp --dry-run          # preview all actions
+./teardown-cluster.exp --remove-docker    # also uninstall Docker from registry node
+./teardown-cluster.exp --keep-hostname    # skip hostname reset (bootstrap overwrites anyway)
+./teardown-cluster.exp --from T3_stop_registry  # resume from a specific stage
+```
+
+T1 is resilient to IP drift — it tries stored IPs first, then falls back to scanning the subnet and identifying nodes by their SSH hostname. You do not need a valid state file to run teardown.
+
+### Full reinstall cycle
+
+```bash
+./teardown-cluster.exp                    # reset to factory-equivalent state
+./bootstrap-turingpi-cluster.exp --phase A  # fresh Phase A from scratch
+```
 
 ---
 
