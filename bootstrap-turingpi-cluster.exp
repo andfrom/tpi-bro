@@ -831,6 +831,12 @@ proc stage_A3_flash_optional {dry stateRef} {
 
       if {$::BMC_HOST eq ""} { die "BMC host not known. Run A1 first." }
 
+      # Verify SSH connectivity to BMC before attempting any operations
+      lassign [bmc_cmd "echo ok"] _rc _out
+      if {$_rc != 0 || ![string match "*ok*" $_out]} {
+        die "Cannot connect to BMC at $::BMC_HOST as $::BMC_USER via SSH.\nIf the BMC requires a password, set BMC_PASS in bootstrap-config.kv.\nIf using key-based auth, ensure your SSH key is authorized on the BMC."
+      }
+
       # Ensure SD card is mounted at the parent of BMC_IMAGE_DIR
       set sdcard_mount [file dirname $::BMC_IMAGE_DIR]
       say "  Checking BMC SD card mount at $sdcard_mount…"
