@@ -11,11 +11,8 @@ Ordered roughly by dependency / priority. Items with `[BLOCKED]` cannot start un
 The Expect script has stub `tpi_power` calls in A2 and A4. Replace with real `exec tpi power on -n $node` / `exec tpi power off` wrapped in `expect` to confirm completion before proceeding to the next step.
 
 ### A-02: Write teardown script
-**Status:** TODO  
-A `teardown-cluster.exp` (or `--teardown` flag) that resets nodes to a re-bootstrappable state. Open questions that must be resolved first:
-- Do DHCP leases survive a full power cycle? (stable IPs needed for re-bootstrap)
-- Should teardown remove Docker entirely or just stop/remove the registry container?
-- Should teardown reset the node password to `ubuntu:ubuntu` or leave it for the operator to reflash?
+**Status:** DONE (`teardown-cluster.exp`)  
+Stages T1–T8: load state → verify SSH → stop registry → reset passwords → reset hostnames → clean /etc/hosts → graceful poweroff + tpi → archive state. Flags: `--dry-run`, `--remove-docker`, `--keep-hostname`, `--from`/`--to`, `--password`.
 
 ### A-03: Dry-run for all stages (not just Phase A)
 **Status:** TODO  
@@ -75,6 +72,10 @@ Document how to federate the local cluster with a cloud K8s cluster (e.g., for G
 ---
 
 ## Phase D — Multi-Agent Workloads
+
+### D-00: Apply PriorityClass and ResourceRequests to all agent Deployments
+**Status:** TODO  
+`[BLOCKED on D-01]` Create `interactive` (value 1000) and `background` (value 100) PriorityClasses. Set resource requests + limits on all agent and Ollama pods per ADR-0008. Add a LimitRange to each namespace.
 
 ### D-01: Ollama deployment on each LLM node
 **Status:** TODO  

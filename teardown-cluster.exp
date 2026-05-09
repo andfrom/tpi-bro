@@ -1,0 +1,421 @@
+#!/usr/bin/expect -f
+
+# teardown-cluster.exp — Reset TuringPi cluster to a re-bootstrappable state.
+#
+# Reverses Phase A: stops the registry, resets node passwords to ubuntu:ubuntu,
+# resets hostnames, removes /etc/hosts entries, gracefully shuts down nodes,
+# and powers them off via the BMC.
+#
+# Designed for scratch-reinstall testing — after a successful teardown the
+# bootstrap script can be rerun from A1 on a clean slate.
+#
+# Usage:
+#   ./teardown-cluster.exp [options]
+#
+# Options:
+#   --dry-run                Print actions without making changes
+#   --from STAGE             Start from this stage (default: first)
+#   --to STAGE               Stop after this stage (default: last)
+#   --password PASS          Current node password (prompted if omitted)
+#   --remove-docker          Also uninstall Docker from the registry node
+#   --keep-hostname          Skip hostname reset (Phase A5 overwrites it anyway)
+#   --help, --usage          Show this message
+
+# ---------- Defaults ----------
+set NODE_COUNT 4
+set NODE_PREFIX "rk1-node"
+set DEFAULT_USER "ubuntu"
+set DEFAULT_PASS "ubuntu"        ;# password we're resetting BACK TO
+set CURRENT_PASS ""              ;# password set during bootstrap (prompted)
+set REGISTRY_NODE_IDX 1
+set REGISTRY_PORT 5000
+set STATE_FILE "./bootstrap-state.kv"
+set REMOVE_DOCKER 0
+set KEEP_HOSTNAME 0
+
+# ---------- Stage Registry ----------
+set STAGES {
+  T1_load_state
+  T2_verify_connectivity
+  T3_stop_registry
+  T4_reset_passwords
+  T5_reset_hostnames
+  T6_clean_laptop_hosts
+  T7_poweroff_nodes
+  T8_clear_state
+}
+
+# ---------- utils (shared with bootstrap) ----------
+proc say {msg} { puts "\n==> $msg" }
+proc sh {cmd} {
+  set rc [catch {set f [open "|$cmd 2>@1" r]; set out [read $f]; close $f; return $out} out]
+  if {$rc} { return "" }
+  return $out
+}
+proc ask_secret {prompt} {
+  stty -echo
+  send_user $prompt
+  expect_user -re "(.*)\n"
+  stty echo
+  send_user "\n"
+  return $expect_out(1,string)
+}
+proc die {msg} { puts stderr "ERROR: $msg"; exit 1 }
+
+proc print_help {} {
+  upvar STAGES STAGES
+  puts "TuringPi Cluster Teardown\n"
+  puts "Resets nodes to a re-bootstrappable state (ubuntu:ubuntu, no registry,\n/etc/hosts cleaned, nodes powered off).\n"
+  puts "Usage:"
+  puts "  ./teardown-cluster.exp \[--dry-run\] \[--from <STAGE>\] \[--to <STAGE>\]"
+  puts "  ./teardown-cluster.exp \[--password PASS\] \[--remove-docker\] \[--keep-hostname\]"
+  puts ""
+  puts "Options:"
+  puts "  --dry-run            Print actions without making changes"
+  puts "  --from STAGE         Start from a specific stage"
+  puts "  --to STAGE           Stop after a specific stage"
+  puts "  --password PASS      Current node password (prompted if omitted)"
+  puts "  --remove-docker      Also uninstall Docker from the registry node"
+  puts "  --keep-hostname      Skip hostname reset (next bootstrap overwrites anyway)"
+  puts "  --help, --usage      Show this message"
+  puts ""
+  puts "Stages:"
+  foreach s $STAGES { puts "  - $s" }
+  puts ""
+  puts "State file: $::STATE_FILE (cleared in T8)"
+}
+
+# ---------- State helpers (shared with bootstrap) ----------
+proc kv_load {file} {
+  set m [dict create]
+  if {[file exists $file]} {
+    set f [open $file r]
+    while {[gets $f line] >= 0} {
+      set line [string trim $line]
+      if {$line eq "" || [string match "#*" $line]} continue
+      if {[regexp {^([^=]+)=(.*)$} $line -> k v]} {
+        dict set m [string trim $k] [string trim $v]
+      }
+    }
+    close $f
+  }
+  return $m
+}
+proc state_get {m key default} {
+  if {[dict exists $m $key]} { return [dict get $m $key] }
+  return $default
+}
+
+# ---------- SSH helpers ----------
+proc ssh_shell {ip user pass commands} {
+  spawn ssh -tt -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$ip
+  expect {
+    -re "(P|p)assword:"     { send "$pass\r"; exp_continue }
+    -re "Are you sure.*"    { send "yes\r";   exp_continue }
+    -re "\\$ "              { }
+    timeout                 { return 1 }
+    eof                     { return 1 }
+  }
+  foreach c $commands {
+    send -- "$c\r"
+    expect {
+      -re "(?i)\\[sudo\\] password for $user:" { send -- "$pass\r"; exp_continue }
+      -re "\\$ "  { }
+      timeout     { return 1 }
+    }
+  }
+  send -- "exit\r"
+  expect eof
+  return 0
+}
+
+proc ssh_reachable {ip user pass} {
+  set rc [catch {
+    spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=5 $user@$ip "echo ok"
+    expect {
+      -re "(P|p)assword:" { send "$pass\r"; exp_continue }
+      -re "Are you sure.*" { send "yes\r"; exp_continue }
+      "ok"    { return 0 }
+      timeout { return 1 }
+      eof     { return 1 }
+    }
+  } err]
+  if {$rc} { return 1 }
+  return 0
+}
+
+# ---------- Parse Arguments ----------
+set dryrun 0
+set fromStage ""
+set toStage ""
+for {set i 0} {$i < $argc} {incr i} {
+  set a [lindex $argv $i]
+  switch -- $a {
+    "--dry-run"       { set dryrun 1 }
+    "--from"          { incr i; set fromStage [lindex $argv $i] }
+    "--to"            { incr i; set toStage   [lindex $argv $i] }
+    "--password"      { incr i; set CURRENT_PASS [lindex $argv $i] }
+    "--remove-docker" { set REMOVE_DOCKER 1 }
+    "--keep-hostname" { set KEEP_HOSTNAME 1 }
+    "--help" -
+    "--usage"         { print_help; exit 0 }
+    default           { }
+  }
+}
+
+proc stage_index {name} {
+  upvar STAGES STAGES
+  set idx 0
+  foreach s $STAGES { if {$s eq $name} { return $idx }; incr idx }
+  return -1
+}
+set startIdx 0
+set endIdx [expr {[llength $STAGES] - 1}]
+if {$fromStage ne ""} {
+  set i [stage_index $fromStage]
+  if {$i < 0} { die "Unknown --from stage: $fromStage" }
+  set startIdx $i
+}
+if {$toStage ne ""} {
+  set j [stage_index $toStage]
+  if {$j < 0} { die "Unknown --to stage: $toStage" }
+  set endIdx $j
+}
+
+# ---------- Stage Implementations ----------
+
+# T1: Load state file; verify we have node IPs; prompt for current password.
+proc stage_T1_load_state {dry stateRef} {
+  upvar $stateRef state
+  say "T1: Loading state from $::STATE_FILE"
+
+  if {![file exists $::STATE_FILE]} {
+    die "No state file found at $::STATE_FILE — nothing to tear down, or run from the repo root."
+  }
+
+  set missing {}
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+    set key "${::NODE_PREFIX}$i"
+    set ip [state_get $state $key ""]
+    if {$ip eq ""} { lappend missing $key }
+  }
+  if {[llength $missing] > 0} {
+    say "WARNING: IPs missing for: [join $missing {, }]"
+    say "These nodes will be skipped in SSH stages."
+  }
+
+  if {$dry} {
+    say "DRY: would prompt for current node password"
+    return
+  }
+
+  if {$::CURRENT_PASS eq ""} {
+    set ::CURRENT_PASS [ask_secret "Current node password (set during bootstrap): "]
+  }
+  if {$::CURRENT_PASS eq ""} {
+    die "No password supplied — cannot SSH into nodes."
+  }
+  say "T1: state loaded; [llength [dict keys $state]] keys found."
+}
+
+# T2: Verify SSH connectivity to all nodes using the current password.
+proc stage_T2_verify_connectivity {dry stateRef} {
+  upvar $stateRef state
+  say "T2: Verifying SSH connectivity"
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+    set name "${::NODE_PREFIX}$i"
+    set ip [state_get $state $name ""]
+    if {$ip eq ""} { say "  $name: IP unknown — skipping"; continue }
+    if {$dry} { say "DRY: would ssh $::DEFAULT_USER@$ip (with current password)"; continue }
+    if {[ssh_reachable $ip $::DEFAULT_USER $::CURRENT_PASS]} {
+      say "  $name ($ip): NOT reachable — check IP or password"
+    } else {
+      say "  $name ($ip): OK"
+    }
+  }
+}
+
+# T3: Stop and remove the registry container on the registry node.
+#     With --remove-docker, also uninstall docker.io.
+proc stage_T3_stop_registry {dry stateRef} {
+  upvar $stateRef state
+  set reg "${::NODE_PREFIX}$::REGISTRY_NODE_IDX"
+  set ip [state_get $state $reg ""]
+  say "T3: Stop registry on $reg ($ip)"
+  if {$ip eq ""} { say "  No IP for $reg — skipping"; return }
+
+  set cmds [list \
+    "sudo docker stop registry 2>/dev/null || true" \
+    "sudo docker rm   registry 2>/dev/null || true" \
+  ]
+  if {$::REMOVE_DOCKER} {
+    lappend cmds "sudo apt-get purge -y docker.io docker-ce docker-ce-cli 2>/dev/null || true"
+    lappend cmds "sudo apt-get autoremove -y 2>/dev/null || true"
+  }
+
+  if {$dry} {
+    foreach c $cmds { say "DRY: on $reg: $c" }
+    return
+  }
+  if {[ssh_shell $ip $::DEFAULT_USER $::CURRENT_PASS $cmds]} {
+    say "  WARNING: some commands may have failed on $reg"
+  } else {
+    say "  registry stopped on $reg"
+    if {$::REMOVE_DOCKER} { say "  docker removed from $reg" }
+  }
+}
+
+# T4: Reset password on every node back to ubuntu:ubuntu.
+#     After this stage the bootstrap script can SSH in with default credentials.
+proc stage_T4_reset_passwords {dry stateRef} {
+  upvar $stateRef state
+  say "T4: Reset passwords to ubuntu:$::DEFAULT_PASS"
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+    set name "${::NODE_PREFIX}$i"
+    set ip [state_get $state $name ""]
+    if {$ip eq ""} { say "  $name: IP unknown — skipping"; continue }
+    set cmds [list \
+      "echo '${::DEFAULT_USER}:${::DEFAULT_PASS}' | sudo chpasswd" \
+    ]
+    if {$dry} {
+      say "DRY: on $name ($ip): ${cmds}"
+      continue
+    }
+    if {[ssh_shell $ip $::DEFAULT_USER $::CURRENT_PASS $cmds]} {
+      say "  WARNING: password reset may have failed on $name"
+    } else {
+      say "  $name ($ip): password reset to $::DEFAULT_PASS"
+    }
+  }
+}
+
+# T5: Reset hostnames back to ubuntu on every node.
+#     Optional (--keep-hostname to skip) because Phase A5 overwrites this anyway.
+#     Also removes the 127.0.1.1 rk1-nodeN entry from /etc/hosts on each node.
+proc stage_T5_reset_hostnames {dry stateRef} {
+  upvar $stateRef state
+  if {$::KEEP_HOSTNAME} { say "T5: Skipping hostname reset (--keep-hostname)"; return }
+  say "T5: Reset hostnames to ubuntu"
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+    set name "${::NODE_PREFIX}$i"
+    set ip [state_get $state $name ""]
+    if {$ip eq ""} { say "  $name: IP unknown — skipping"; continue }
+    # Use CURRENT_PASS if password reset (T4) didn't complete yet, otherwise DEFAULT_PASS.
+    # We always run T5 after T4, so the password is now DEFAULT_PASS.
+    # Guard: if run standalone (--from T5), we may still need CURRENT_PASS.
+    set pass $::DEFAULT_PASS
+    if {$::CURRENT_PASS ne ""} { set pass $::CURRENT_PASS }
+    set cmds [list \
+      "sudo hostnamectl set-hostname ubuntu" \
+      {sudo sed -i "/\brk1-node[0-9]*\b/d" /etc/hosts} \
+    ]
+    if {$dry} {
+      foreach c $cmds { say "DRY: on $name ($ip): $c" }
+      continue
+    }
+    if {[ssh_shell $ip $::DEFAULT_USER $pass $cmds]} {
+      say "  WARNING: hostname reset may have failed on $name"
+    } else {
+      say "  $name ($ip): hostname reset to ubuntu"
+    }
+  }
+}
+
+# T6: Remove rk1-nodeN entries from the laptop's /etc/hosts.
+proc stage_T6_clean_laptop_hosts {dry stateRef} {
+  upvar $stateRef state
+  say "T6: Remove node entries from /etc/hosts"
+  set names {}
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} { lappend names "${::NODE_PREFIX}$i" }
+  if {$dry} {
+    say "DRY: would run: sudo bootstrap-host-helper.sh hosts-remove [join $names { }]"
+    return
+  }
+  set flat [join $names " "]
+  set rc [catch {sh "sudo [file dirname [info script]]/bootstrap-host-helper.sh hosts-remove $flat"} out]
+  if {$rc} {
+    say "WARNING: /etc/hosts cleanup failed: $out"
+  } else {
+    say "  /etc/hosts updated:\n$out"
+  }
+}
+
+# T7: Gracefully power down nodes (SSH poweroff), then confirm via tpi.
+#     tpi power off is a hard cut — SSH poweroff first gives the OS a chance to flush.
+proc stage_T7_poweroff_nodes {dry stateRef} {
+  upvar $stateRef state
+  say "T7: Powering down nodes"
+
+  # After T4 the password is DEFAULT_PASS.  If T4 was skipped, fall back to CURRENT_PASS.
+  set pass $::DEFAULT_PASS
+  if {$::CURRENT_PASS ne ""} { set pass $::CURRENT_PASS }
+
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+    set name "${::NODE_PREFIX}$i"
+    set ip [state_get $state $name ""]
+    if {$ip eq ""} { say "  $name: IP unknown — skipping graceful shutdown"; continue }
+    if {$dry} { say "DRY: ssh $name: sudo poweroff"; continue }
+    say "  $name ($ip): graceful shutdown…"
+    catch {ssh_shell $ip $::DEFAULT_USER $pass [list "sudo poweroff"]}
+  }
+
+  if {!$dry} {
+    say "  waiting 10s for OS shutdown…"
+    sleep 10
+  }
+
+  # BMC hard power-off (idempotent even if nodes already off)
+  if {$dry} {
+    say "DRY: tpi power off  (all nodes)"
+  } else {
+    say "  BMC: tpi power off"
+    catch {set out [sh "tpi power off"]}
+    say "  $out"
+  }
+}
+
+# T8: Archive or delete the bootstrap state file.
+#     Keeps a timestamped backup so IPs can be recovered if needed.
+proc stage_T8_clear_state {dry stateRef} {
+  upvar $stateRef state
+  say "T8: Clear state file"
+  if {![file exists $::STATE_FILE]} { say "  No state file found — nothing to clear."; return }
+  set backup "${::STATE_FILE}.bak.[clock format [clock seconds] -format {%Y%m%d-%H%M%S}]"
+  if {$dry} {
+    say "DRY: would rename $::STATE_FILE → $backup"
+    return
+  }
+  file rename -force $::STATE_FILE $backup
+  say "  state archived to $backup"
+  say "  Cluster is now in a clean state — ready for bootstrap rerun."
+}
+
+# ---------- Main ----------
+if {$argc == 0} {
+  puts "Tip: run './teardown-cluster.exp --help' for usage."
+  puts "     run './teardown-cluster.exp --dry-run' to preview all teardown actions."
+}
+
+say "Starting teardown (dry-run=$dryrun, from=[expr {$fromStage eq {} ? {start} : $fromStage}], to=[expr {$toStage eq {} ? {end} : $toStage}])"
+if {$REMOVE_DOCKER} { say "  --remove-docker: Docker will be uninstalled from registry node" }
+if {$KEEP_HOSTNAME}  { say "  --keep-hostname: hostname reset skipped" }
+
+set state [kv_load $STATE_FILE]
+
+for {set idx $startIdx} {$idx <= $endIdx} {incr idx} {
+  set s [lindex $STAGES $idx]
+  say "Stage $s"
+  switch -- $s {
+    "T1_load_state"         { stage_T1_load_state         $dryrun state }
+    "T2_verify_connectivity"{ stage_T2_verify_connectivity $dryrun state }
+    "T3_stop_registry"      { stage_T3_stop_registry       $dryrun state }
+    "T4_reset_passwords"    { stage_T4_reset_passwords     $dryrun state }
+    "T5_reset_hostnames"    { stage_T5_reset_hostnames     $dryrun state }
+    "T6_clean_laptop_hosts" { stage_T6_clean_laptop_hosts  $dryrun state }
+    "T7_poweroff_nodes"     { stage_T7_poweroff_nodes      $dryrun state }
+    "T8_clear_state"        { stage_T8_clear_state         $dryrun state }
+    default { say "  (unimplemented stage placeholder)" }
+  }
+}
+say "Teardown complete."
