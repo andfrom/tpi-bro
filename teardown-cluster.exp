@@ -55,12 +55,16 @@ proc sh {cmd} {
   return $out
 }
 proc ask_secret {prompt} {
-  stty -echo
+  catch {stty -echo}
   send_user $prompt
-  expect_user -re "(.*)\n"
-  stty echo
+  set val ""
+  expect_user {
+    -timeout -1
+    -re "(.*)\n" { catch { set val [string trimright $expect_out(1,string) "\r"] } }
+  }
+  catch {stty echo}
   send_user "\n"
-  return $expect_out(1,string)
+  return $val
 }
 proc die {msg} { puts stderr "ERROR: $msg"; exit 1 }
 
@@ -121,7 +125,7 @@ proc ssh_shell {ip user pass commands} {
   foreach c $commands {
     send -- "$c\r"
     expect {
-      -re "(?i)\\[sudo\\] password for $user:" { send -- "$pass\r"; exp_continue }
+      -re "(?i)password for $user:" { send -- "$pass\r"; exp_continue }
       -re "\\$ "  { }
       timeout     { return 1 }
     }
