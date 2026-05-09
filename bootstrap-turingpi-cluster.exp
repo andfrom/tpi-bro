@@ -227,7 +227,7 @@ proc ssh_shell {ip user pass commands} {
   foreach c $commands {
     send -- "$c\r"
     expect {
-      -re "(?i)\\[sudo\\] password for $user:" { send -- "$pass\r"; exp_continue }
+      -re "(?i)password for $user:" { send -- "$pass\r"; exp_continue }
       -re "\\$ " { }
       eof     { return 1 }
       timeout { return 1 }
@@ -239,9 +239,17 @@ proc ssh_shell {ip user pass commands} {
 # Checks
 proc check_bmc_known {state} { set ip [state_get $state "bmc_ip" ""]; return [expr {$ip ne ""}] }
 proc check_node_named {ip nodename user pass} {
-  set out [sh "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$ip hostname 2>/dev/null || true"]
-  regsub -all {\n} $out "" out
-  return [expr {$out eq $nodename}]
+  set found ""
+  spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=3 -o BatchMode=no $user@$ip hostname
+  expect {
+    -re "(P|p)assword:" { send "$pass\r"; exp_continue }
+    -re "Are you sure.*" { send "yes\r"; exp_continue }
+    -re {([^\r\n]+)\r?\n} { set found [string trim $expect_out(1,string)]; exp_continue }
+    timeout { catch {close} }
+    eof {}
+  }
+  return [expr {$found eq $nodename}]
 }
 proc check_hosts_contains {name ip} {
   set out [sh "grep -E \"\\b$name\\b\" /etc/hosts || true"]
