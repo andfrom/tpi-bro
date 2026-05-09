@@ -2,6 +2,12 @@
 bootstrap-state.kv
 bootstrap-state.json
 
+# Live cluster config — contains BMC IP; gitignored so it stays local
+bootstrap-config.kv
+bmc-manifest.kv
+images-manifest.kv
+image-cache/
+
 # Old/superseded scripts
 _bootstrap-*.exp
 

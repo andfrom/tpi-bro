@@ -4,14 +4,10 @@ _Last updated: 2026-05-09_
 
 ## Current state
 
-**No automated tests exist yet.** A-04 in the backlog tracks the CI dry-run work.
-All verification to date has been manual. This document defines what a full
-verification run looks like, organises the 21 identified test paths into three
-suites, and records what remains untestable without special tooling.
-
-**BMC firmware installation is not covered and not scripted.** `tpi firmware`
-commands exist in the tpi CLI but are not called anywhere in this repo.
-Phase B / C / D are not implemented and therefore not testable.
+**Automated tests implemented.** `tests/run-ci.sh` runs 27 tests (Suites 1 + 2)
+on every push/PR via GitHub Actions — no hardware required. `tests/run-hardware.sh`
+orchestrates the full cluster-cycle verification (Suite 3) when real hardware is
+available. Phase B / C / D are not implemented and therefore not testable.
 
 ---
 
@@ -41,6 +37,18 @@ bootstrap-turingpi-cluster.exp
 │       └── not found ───────────────────────────── warning, keep old entry
 │
 └── stage loop  [--phase A]  [--from X --to Y]
+    │
+    ├── A0  bmc_firmware
+    │   ├── skip (default) ─────────────────────────── "Skipping BMC firmware check"
+    │   ├── dry (any mode) ─────────────────────────── print plan, exit before BMC_HOST check
+    │   ├── check
+    │   │   ├── tpi info → version matches latest ──── "already up to date"
+    │   │   └── tpi info → version outdated ─────────── warning; no action
+    │   └── upgrade
+    │       ├── bmc-manifest.kv missing ────────────── die ✗
+    │       ├── download OK + SHA256 OK ─────────────── flash firmware + wait for reboot
+    │       ├── download fails ──────────────────────── die ✗
+    │       └── SHA256 mismatch ─────────────────────── die ✗
     │
     ├── A1  find_bmc
     │   ├── dry ────────────────────────────────────── print nmap plan
@@ -159,7 +167,6 @@ teardown-cluster.exp
 
 
 NOT COVERED BY ANY SCRIPT
-  ├── BMC firmware flashing  (tpi firmware upgrade)
   ├── Phase B  k3s install + persistent registry
   ├── Phase C  resilience + laptop mirror
   └── Phase D  multi-agent workloads
@@ -167,22 +174,22 @@ NOT COVERED BY ANY SCRIPT
 
 ---
 
-## Suite 1 — CI dry-run  (17 paths, no hardware required)
+## Suite 1 — CI dry-run  (20 paths, no hardware required)
 
-These should all pass in GitHub Actions. None of them touch real hardware, make
+These all pass in GitHub Actions on every push/PR. None touch real hardware, make
 network requests to external servers, or require `sudo`. They verify that every
 stage emits the expected dry-run output and that all error paths die with a
 useful message.
 
-Run the whole suite with:
+Run with:
 
 ```bash
-./tests/run-dry-run-suite.sh
+./tests/run-ci.sh --suite 1
 ```
 
 | # | Command | Branch(es) exercised |
 |---|---------|----------------------|
-| D01 | `bootstrap --dry-run --phase A` | A1 no-state, A2, A3 skip, A4 no-state, A5, A6 no-IPs-warning, A7 |
+| D01 | `bootstrap --dry-run --phase A` | A0 skip, A1 no-state, A2, A3 skip, A4–A7 |
 | D02 | `bootstrap --dry-run --phase A`  *(state file contains `bmc_ip`)* | A1 already-known |
 | D03 | `bootstrap --dry-run --from A3_flash_optional --to A3_flash_optional --flash local` | A3 local |
 | D04 | `bootstrap --dry-run --from A3_flash_optional --to A3_flash_optional --flash image --image w.img --image-1 s.img` | A3 image + per-node override |
@@ -193,35 +200,40 @@ Run the whole suite with:
 | D09 | `bootstrap --dry-run --from A3_flash_optional --to A3_flash_optional --flash download --manifest ...` *(config sets `IMAGE_1_TYPE=unknown`)* | A3 download unknown type → die |
 | D10 | `bootstrap --dry-run --from A3_flash_optional --to A3_flash_optional --flash bogus` | A3 invalid FLASH_MODE → die |
 | D11 | `bootstrap --dry-run --rediscover` | rediscover dry path |
-| D12 | `bootstrap --config valid-test.kv --dry-run --phase A` | config file loaded; values applied |
+| D12 | `bootstrap --config tests/fixtures/test-config.kv --dry-run --phase A` | config file loaded; values applied |
 | D13 | `bootstrap --config /nonexistent.kv` | missing config → die |
 | D14 | `bootstrap --dry-run --from BOGUS_STAGE` | unknown stage → die |
 | D15 | `teardown --dry-run` *(state file present)* | T1–T8 all stages |
 | D16 | `teardown --dry-run` *(no state file)* | T1 scan-only path + T8 no-op |
 | D17 | `teardown --dry-run --keep-hostname --remove-docker` | T3 extended cmds + T5 skipped |
+| D18 | `bootstrap --dry-run --from A0_bmc_firmware --to A0_bmc_firmware` | A0 skip path |
+| D19 | `bootstrap --dry-run --from A0_bmc_firmware --to A0_bmc_firmware --bmc-firmware check` | A0 check dry-run |
+| D20 | `bootstrap --dry-run --from A0_bmc_firmware --to A0_bmc_firmware --bmc-firmware upgrade` | A0 upgrade dry-run |
 
 ---
 
-## Suite 2 — Mock / fault injection  (no hardware required)
+## Suite 2 — Mock / fault injection  (7 paths, no hardware required)
 
 These run the scripts in **real (non-dry-run) mode** but against fabricated local
-inputs, so no TuringPi is needed. They exercise the error paths that dry-run
-cannot reach because those paths only trigger after a real operation.
+inputs. A stub `tpi` binary (`tests/fixtures/bin/tpi`) is injected at the front
+of `$PATH` so the script never tries to connect to a real BMC. Download tests use
+`file://` URLs so `curl` fetches local files — no external network needed.
 
-All mocks use files under `tests/fixtures/`.
+Run with:
+
+```bash
+./tests/run-ci.sh --suite 2
+```
 
 | # | Setup | Command | Expected outcome |
 |---|-------|---------|-----------------|
-| M01 | `tests/fixtures/dummy.img` (1 MB zeros) + manifest with **correct** SHA256 | `bootstrap --flash download --manifest ...` *(real mode, no hardware — script dies at tpi flash call, not before)* | Download + verify succeed; script fails later at `tpi flash` (not a test failure) |
-| M02 | Same dummy image already in `image-cache/` with correct SHA256 | Same as M01 | Cache hit logged; SHA256 OK; script proceeds to `tpi flash` |
-| M03 | Same dummy image in cache but **contents corrupted** (SHA256 wrong) | Same | "SHA256 mismatch — re-downloading" logged; file deleted; fresh download attempted |
-| M04 | Manifest pointing at a **404 URL** | `bootstrap --flash download --manifest ...` *(real mode)* | `curl` fails; die with "Download failed" message |
-| M05 | Manifest with mismatched SHA256 for a real downloadable file | `bootstrap --flash download --manifest ...` | Download succeeds; SHA256 check fails; die with MitM warning; cache file deleted |
-| M06 | `tests/fixtures/bootstrap-config.kv` with `SUBNET=10.99.0.0/24` | `bootstrap --dry-run --phase A` | Dry-run output shows `10.99.0.0/24` (config loaded correctly) |
-| M07 | State file with `bmc_ip=192.168.1.1` | `bootstrap --dry-run --phase A` | A1 logs "already known at 192.168.1.1" (state-restore path) |
-
-M01–M05 require network access for the download tests (M04/M05) or are fully
-offline (M01–M03, M06–M07). None require the TuringPi board.
+| M01 | 1 MB zero image + manifest with **correct** SHA256; `file://` URL | `bootstrap --flash download --manifest ...` | SHA256 OK; stub tpi exits 1 (expected); "mismatch" absent |
+| M02 | Same image already in cache dir with correct SHA256 | Same as M01 | "Cache hit" logged; no re-download |
+| M03 | Corrupted file in cache (SHA256 wrong) | Same | "re-downloading" logged; file deleted; fresh download attempted |
+| M04 | Manifest pointing at `file:///nonexistent/path/image.img` | `bootstrap --flash download --manifest ...` | curl fails; die with "Download failed" |
+| M05 | Manifest with **wrong SHA256** for a valid downloadable file | Same | Download succeeds; SHA256 check fails; die with "mismatch after download" |
+| M06 | `tests/fixtures/test-config.kv` with `SUBNET=10.99.0.0/24` | `bootstrap --dry-run --phase A --config ...` | Dry-run shows `10.99.0.0/24` (config loaded) |
+| M07 | State file with `bmc_ip=192.168.99.1` | `bootstrap --dry-run --phase A --config ...` | A1 logs "already known at 192.168.99.1" (state-restore path) |
 
 ---
 
@@ -296,10 +308,10 @@ teardown --password <current-pass>
 
 | Path type | Count | Automated? |
 |-----------|-------|-----------|
-| CI dry-run (Suite 1) | 17 | TODO (A-04) — should run in GitHub Actions |
-| Mock / fault-injection (Suite 2) | 7 | TODO — runnable offline or with network only |
+| CI dry-run (Suite 1) | 20 | Yes — GitHub Actions on every push/PR |
+| Mock / fault-injection (Suite 2) | 7 | Yes — GitHub Actions on every push/PR |
 | Hardware verification (Suite 3) | 4 scenarios | Manual — run before significant merges |
-| **Total** | **28** | |
+| **Total automated** | **27** | |
 
 ### Paths not reachable without special tooling
 
@@ -308,4 +320,4 @@ teardown --password <current-pass>
 | A1 nmap fails → manual IP prompt | Requires interactive TTY; not automatable |
 | A4 node timeout (never appears) | Would need hardware fault simulation |
 | T1 "no nodes found at all" → die | All nodes must be unreachable simultaneously |
-| BMC firmware installation | Not scripted; out of scope for Phase A |
+| A0 upgrade real path | Requires live BMC + firmware file; manual only |

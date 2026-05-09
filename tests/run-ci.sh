@@ -11,6 +11,10 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# Prevent auto-loading of ./bootstrap-config.kv during tests — each test that
+# needs config isolation passes its own --config file explicitly.
+export BOOTSTRAP_NO_AUTO_CONFIG=1
+
 BOOTSTRAP="./bootstrap-turingpi-cluster.exp"
 TEARDOWN="./teardown-cluster.exp"
 FIXTURES="./tests/fixtures"

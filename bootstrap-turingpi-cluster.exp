@@ -329,6 +329,23 @@ proc sha256_file {path} {
   return [string trim [lindex [split [sh "sha256sum [list $path]"] " "] 0]]
 }
 
+# Verify a local image file against its .sha256 sidecar if one exists.
+# Dies on mismatch; warns and continues if the sidecar is absent.
+proc verify_image_sidecar {path} {
+  set sidecar "${path}.sha256"
+  if {![file exists $sidecar]} {
+    say "  WARNING: no .sha256 sidecar for [file tail $path] — skipping verification"
+    return
+  }
+  set expected [string trim [lindex [split [read [open $sidecar r]] " \t\n"] 0]]
+  say "  Verifying SHA256 of [file tail $path]…"
+  set actual [sha256_file $path]
+  if {$actual ne $expected} {
+    die "SHA256 mismatch for [file tail $path]\n  got:      $actual\n  expected: $expected"
+  }
+  say "  SHA256 OK"
+}
+
 # Ensure the image for $type is present in the cache and its SHA256 matches the manifest.
 # Downloads and verifies if missing or corrupted. Returns the local file path.
 proc ensure_image_cached {type manifest} {
@@ -409,8 +426,10 @@ for {set i 0} {$i < $argc} {incr i} {
   if {$a eq "--help" || $a eq "--usage"} { print_help; exit 0 }
   if {$a eq "--config"} { incr i; lappend _config_files [lindex $argv $i] }
 }
-# Auto-load ./bootstrap-config.kv when no --config was given
-if {[llength $_config_files] == 0 && [file exists "./bootstrap-config.kv"]} {
+# Auto-load ./bootstrap-config.kv when no --config was given.
+# Set BOOTSTRAP_NO_AUTO_CONFIG=1 in the environment to suppress (used by CI tests).
+if {[llength $_config_files] == 0 && [file exists "./bootstrap-config.kv"] \
+    && ![info exists ::env(BOOTSTRAP_NO_AUTO_CONFIG)]} {
   lappend _config_files "./bootstrap-config.kv"
 }
 foreach _cf $_config_files {
@@ -620,9 +639,20 @@ proc stage_A3_flash_optional {dry stateRef} {
       }
       if {$dry} {
         for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
-          say "DRY: tpi flash -n $i --image-path [flash_image_for $i]"
+          set img [flash_image_for $i]
+          set sidecar_note [expr {[file exists "${img}.sha256"] ? " (SHA256 sidecar present)" : " (no .sha256 sidecar)"}]
+          say "DRY: tpi flash -n $i --image-path $img$sidecar_note"
         }
         return
+      }
+      # Verify SHA256 of every distinct image before touching any node
+      set seen_imgs [dict create]
+      for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+        set img [flash_image_for $i]
+        if {![dict exists $seen_imgs $img]} {
+          verify_image_sidecar $img
+          dict set seen_imgs $img 1
+        }
       }
       say "Flashing $::NODE_COUNT nodes (this may take several minutes per node)…"
       for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
@@ -776,11 +806,17 @@ proc stage_A5_name_password_reboot {dry stateRef} {
     ]
     ssh_shell $ip $::DEFAULT_USER $::DEFAULT_PASS $cmds
     say "  waiting for $name to return…"
-    sleep 10
-    for {set tries 0} {$tries < 24} {incr tries} {
-      if {[ssh_ok $ip $::DEFAULT_USER $::NEW_PASS "hostname"] == 0} { break }
-      sleep 5
+    after 10000
+    set deadline [expr {[clock seconds] + 120}]
+    set up 0
+    while {[clock seconds] < $deadline} {
+      if {[ssh_ok $ip $::DEFAULT_USER $::NEW_PASS "hostname"] == 0} { set up 1; break }
+      after 5000
     }
+    if {!$up} {
+      die "$name did not return within 120 s after reboot.\nCheck power and network, then rerun --from A5."
+    }
+    say "  $name is back"
   }
 }
 

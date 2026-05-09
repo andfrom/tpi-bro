@@ -19,8 +19,20 @@ Stages T1–T8: load state → verify SSH → stop registry → reset passwords 
 `--dry-run` verified across all bootstrap stages (Phase A), `--rediscover`, and all teardown stages (T1–T8). All produce meaningful output.
 
 ### A-04: CI / automated test for Phase A dry-run
-**Status:** TODO  
-Run `bootstrap-turingpi-cluster.exp --dry-run --phase A` in CI (GitHub Actions) to catch syntax errors and broken stage logic without real hardware.
+**Status:** DONE  
+GitHub Actions workflow (`.github/workflows/ci.yml`) runs `./tests/run-ci.sh` on every push/PR to main. No hardware required.
+
+### A-05: Real flash modes (image / download / local)
+**Status:** DONE  
+`--flash image` flashes per-node image files via `tpi flash --image-path`. `--flash download` downloads from a manifest (`images-manifest.kv`), verifies SHA256, caches in `./image-cache/`, and re-downloads on checksum mismatch. `--flash local` uses `tpi flash --local`. All four modes (`skip` / `local` / `image` / `download`) are implemented and tested.
+
+### A-06: Config file support
+**Status:** DONE  
+`--config FILE` loads key=value overrides before stage execution. If `./bootstrap-config.kv` exists it is auto-loaded. CLI flags always win. `bootstrap-config.kv.example` documents all keys. Per-node image paths (`IMAGE_1` … `IMAGE_4`) and types (`IMAGE_1_TYPE` … `IMAGE_4_TYPE`) are settable from the config file.
+
+### A-07: A0 BMC firmware check / upgrade stage
+**Status:** DONE  
+`A0_bmc_firmware` runs before A1. Controlled by `--bmc-firmware skip|check|upgrade` (default: skip). Check mode compares running BMC version against `bmc-manifest.kv`. Upgrade mode downloads firmware, verifies SHA256, calls `tpi firmware --file`, and waits for BMC reboot. Full dry-run support (exits early before touching BMC host).
 
 ---
 
@@ -97,8 +109,18 @@ Prometheus + Grafana via kube-prometheus-stack Helm chart. Basic dashboards: CPU
 
 ## Security & Hardening (Future)
 
-### S-01: Reverse proxy for remote access
-Node-port exposure is not suitable for internet-facing access. Add Traefik + cert-manager (Let's Encrypt or self-signed) for HTTPS ingress.
+### S-01: Internal HTTPS ingress
+Node-port exposure is not suitable for production traffic. Add Traefik + cert-manager (Let's Encrypt or self-signed) for HTTPS ingress routing inside the cluster.
+
+### S-04: External remote access (Tailscale / reverse proxy)
+**Status:** TODO  
+Accessing the cluster from outside the home LAN (e.g. from a laptop on a different network) requires either a VPN mesh or a cloud-fronted reverse proxy. Options:
+
+- **Tailscale** (recommended): install the Tailscale agent on each node and the laptop; the cluster becomes reachable at stable Tailscale IPs regardless of home network topology or NAT. Zero port forwarding required. Free for personal use; ARM64 Ubuntu supported.
+- **WireGuard**: self-hosted alternative if Tailscale dependency is undesirable.
+- **Cloud reverse proxy**: a small VPS running nginx/caddy with TLS termination, forwarding to the cluster over a persistent tunnel. More control, more ops overhead.
+
+This is a prerequisite for running `sibling-app` agents from a mobile context or CI pipelines outside the home network.
 
 ### S-02: Multi-tenancy / user compartmentalization
 SSD volume isolation per user. Not needed until multiple users share the cluster.

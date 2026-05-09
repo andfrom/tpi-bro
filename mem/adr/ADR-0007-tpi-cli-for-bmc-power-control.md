@@ -11,12 +11,14 @@ The TuringPi 2 BMC (Baseboard Management Controller) exposes both a web UI and a
 
 Use the `tpi` CLI tool (installed on the operator's laptop) for all power control in the bootstrap script. The `tpi` binary communicates with the BMC at `turingpi.local` (mDNS) or a specified IP.
 
-Key commands:
+Key commands used in this repo:
 - `tpi power on -n NODE` — power on single node (1-indexed)
 - `tpi power off -n NODE` — power off single node
 - `tpi power off` — power off all nodes
-- `tpi power reset -n NODE` — hard reset (use sparingly)
-- `tpi flash` — flash firmware to a node
+- `tpi flash -n NODE --image-path FILE` — flash an image file to a node
+- `tpi flash -n NODE --local` — flash from BMC-local storage
+- `tpi firmware --file FILE` — upgrade BMC firmware
+- `tpi info` — query BMC version and board info
 
 ## Consequences
 
@@ -33,6 +35,6 @@ Key commands:
 
 ## Notes
 
-The A2 (poweroff_all) and A4 (power_on_and_discover) stages currently contain placeholder `tpi` calls. These should be replaced with real `exec tpi power ...` Expect calls, wrapping the output in `expect` to confirm success before proceeding.
+All power and flash calls are implemented as real `exec {*}$args` Expect calls. A2 calls `tpi power off`, A4 calls `tpi power on -n N` per node, A3 (download/image modes) calls `tpi flash -n N --image-path FILE`, and A0 (upgrade mode) calls `tpi firmware --file FILE` followed by a BMC reboot wait.
 
-Default BMC host: `turingpi.local`. Override with `--bmc-host` flag if mDNS fails.
+Default BMC host: `turingpi.local`. If mDNS fails before A1 has run, set `BMC_HOST` in `bootstrap-config.kv` or pass `--host` explicitly. A1 pins the BMC IP in `/etc/hosts` so subsequent runs and teardown do not depend on mDNS.

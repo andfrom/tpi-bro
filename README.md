@@ -8,6 +8,38 @@
 >
 > **Disclaimer**: This project has yet to play with Nvidia Jetson (Orin) Nano and CM4 adapters for RPi, so it's not possible to tell if these scripts and instructions will help anyone to get started for such configurations.
 
+## Quick start
+
+Assumes the board is assembled and powered on, nodes have Ubuntu flashed, and `tpi` is installed and authenticated on your laptop.
+
+```bash
+# 1. Clone and make scripts executable
+git clone https://github.com/your-org/tpi-bro && cd tpi-bro
+chmod +x bootstrap-turingpi-cluster.exp teardown-cluster.exp bootstrap-host-helper.sh
+
+# 2. Create your local config (edit SUBNET to match your LAN)
+cp bootstrap-config.kv.example bootstrap-config.kv
+$EDITOR bootstrap-config.kv
+
+# 3. Dry-run to verify everything looks right (no changes made)
+./bootstrap-turingpi-cluster.exp --dry-run --phase A
+
+# 4. Run Phase A — discover BMC, name nodes, set password, start registry
+./bootstrap-turingpi-cluster.exp --phase A
+
+# 5. Verify
+ssh ubuntu@rk1-node1 hostname
+curl http://rk1-node1:5000/v2/_catalog
+```
+
+After step 4 you have: 4 named nodes (`rk1-node{1..4}`), SSH access by hostname, and a Docker registry on `rk1-node1:5000`. Phase B (k3s + persistent registry) is next.
+
+**Need to reflash nodes first?** See [Flashing compute modules](#flashing-compute-modules).  
+**BMC firmware out of date?** See [BMC firmware (A0)](#bmc-firmware-a0).  
+**Starting over?** `./teardown-cluster.exp && ./bootstrap-turingpi-cluster.exp --phase A`
+
+---
+
 ## Introduction
 
 ### Project History
@@ -62,7 +94,7 @@ This repo contains a resumable, staged [**Expect**](https://core.tcl-lang.org/ex
 The Expect script is designed to be:
 - **Resumable**: run a slice with `--from` / `--to`
 - **Dry-run capable**: see what would happen with `--dry-run`
-- **Mode-aware**: choose flashing mode `--flash usb|web|skip`<br>(note: not all USB ports can manage [USB OTG](https://en.wikipedia.org/wiki/USB_On-The-Go) or you might have reasons to use the Web UI...)
+- **Mode-aware**: choose flashing mode `--flash skip|local|image|download` (see [Flashing compute modules](#flashing-compute-modules))
 - **Stateful**: discoveries are saved to `bootstrap-state.kv`
 - **Rediscoverable**: `--rediscover` re-scans the subnet after DHCP reassignment, with no power cycling
 
@@ -122,8 +154,14 @@ Stages A1 and A6 update `/etc/hosts` on your laptop (A1 pins the BMC, A6 pins th
 | `teardown-cluster.exp` | Reverses Phase A — resets nodes to a re-bootstrappable state |
 | `bootstrap-host-helper.sh` | Manages `/etc/hosts` entries (`hosts-append` / `hosts-remove`) |
 | `bootstrap-state.kv` | Generated state file — discovered IPs, MACs, BMC address (gitignored) |
+| `bootstrap-config.kv` | Local config overrides — subnet, node count, flash mode, etc. (gitignored) |
+| `bootstrap-config.kv.example` | Template documenting all config variables |
+| `images-manifest.kv.example` | Template for `--flash download` image manifest |
+| `bmc-manifest.kv.example` | Template for A0 BMC firmware check/upgrade |
 | `gen-registry-certs.sh` | Generates TLS certificates for the Phase B registry |
 | `registry-chart/` | Helm chart for the persistent Phase B registry |
+| `tests/run-ci.sh` | CI test runner — Suites 1+2, no hardware required |
+| `tests/run-hardware.sh` | Hardware test runner — Suite 3, full cluster cycles |
 
 Make the scripts executable:
 
@@ -165,12 +203,32 @@ chmod +x bootstrap-turingpi-cluster.exp teardown-cluster.exp bootstrap-host-help
 ./bootstrap-turingpi-cluster.exp --from A5_name_password_reboot
 ```
 
-#### Choose flashing mode (choose one of the following)
+#### Use a config file
+
+Copy the example and edit it to match your cluster:
 
 ```bash
-./bootstrap-turingpi-cluster.exp --phase A --flash skip   # default
-./bootstrap-turingpi-cluster.exp --phase A --flash usb    # placeholder
-./bootstrap-turingpi-cluster.exp --phase A --flash web    # placeholder
+cp bootstrap-config.kv.example bootstrap-config.kv
+# edit bootstrap-config.kv — it auto-loads on next run
+```
+
+Or pass an explicit config file (multiple `--config` flags allowed):
+
+```bash
+./bootstrap-turingpi-cluster.exp --config /path/to/my-config.kv --dry-run --phase A
+```
+
+CLI flags always override config file values.
+
+#### Choose flashing mode (see also: [Flashing compute modules](#flashing-compute-modules))
+
+```bash
+./bootstrap-turingpi-cluster.exp --phase A --flash skip      # default — no flashing
+./bootstrap-turingpi-cluster.exp --phase A --flash local     # tpi flash --local per node
+./bootstrap-turingpi-cluster.exp --phase A --flash image \   # flash per-node image file
+    --image worker.img --image-1 server.img
+./bootstrap-turingpi-cluster.exp --phase A --flash download \ # download + SHA256 verify
+    --manifest images-manifest.kv
 ```
 
 #### Fix IP drift without re-running Phase A
@@ -188,9 +246,10 @@ If DHCP has reassigned node IPs since the last run (e.g. after WiFi dropped), us
 
 | Stage | Name | What it does |
 |-------|------|--------------|
+| A0 | `bmc_firmware` | Optional BMC firmware check or upgrade (default: skip); see [BMC firmware](#bmc-firmware-a0) |
 | A1 | `find_bmc` | Discover BMC via `nmap` or manual entry; pin `turingpi.local` in `/etc/hosts`; extract BMC MAC |
 | A2 | `poweroff_all` | Power OFF all RK1 nodes via `tpi power off` |
-| A3 | `flash_optional` | Optional flash (USB/web stubs — hardware-specific) |
+| A3 | `flash_optional` | Optional flash — `skip` / `local` / `image` / `download`; see [Flashing compute modules](#flashing-compute-modules) |
 | A4 | `power_on_and_discover` | Power nodes on one-by-one; discover IPs via delta scan; extract MACs; print DHCP reservation summary |
 | A5 | `name_password_reboot` | Change password, set hostnames (`rk1-node{1..4}`), reboot |
 | A6 | `write_hosts_on_laptop` | Append node IP↔hostname entries to laptop `/etc/hosts` |
@@ -223,20 +282,31 @@ Enter these MAC→IP bindings in your router's DHCP reservation settings. Once d
 
 ### Configuration
 
-Open `bootstrap-turingpi-cluster.exp` and adjust the config block near the top:
+Copy `bootstrap-config.kv.example` to `bootstrap-config.kv` and edit it. The file
+is auto-loaded on every run; CLI flags always win over file values. Do not commit
+`bootstrap-config.kv` — it is gitignored.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `SUBNET` | `192.168.1.0/24` | Your LAN subnet |
+| `SUBNET` | `192.168.1.0/24` | Your LAN subnet (used by nmap in A1/A4) |
 | `NODE_COUNT` | `4` | Number of RK1 nodes |
 | `NODE_PREFIX` | `rk1-node` | Hostname prefix |
-| `DEFAULT_USER` | `ubuntu` | Initial SSH username |
-| `DEFAULT_PASS` | `ubuntu` | Initial SSH password |
-| `NEW_PASS` | _(empty)_ | If empty, prompted once and applied to all nodes |
-| `REGISTRY_NODE_IDX` | `1` | Which node hosts the registry |
+| `DEFAULT_USER` | `ubuntu` | Initial SSH username on fresh nodes |
+| `DEFAULT_PASS` | `ubuntu` | Initial SSH password on fresh nodes |
+| `NEW_PASS` | _(empty)_ | Cluster password — prompted at runtime if empty |
+| `REGISTRY_NODE_IDX` | `1` | Which node index hosts the Docker registry |
 | `REGISTRY_PORT` | `5000` | Registry port |
-| `FLASH_MODE` | `skip` | `usb` / `web` / `skip` |
-| `BMC_HOST` | _(auto)_ | Set by A1; passed to `tpi` as `--host` when `turingpi.local` mDNS isn't yet available |
+| `SERVER_NODE_IDX` | `1` | Which node becomes the k3s server (Phase B) |
+| `FLASH_MODE` | `skip` | `skip` / `local` / `image` / `download` |
+| `IMAGE_DEFAULT` | _(empty)_ | Default image path for `--flash image` |
+| `IMAGE_1` … `IMAGE_4` | _(empty)_ | Per-node image path overrides |
+| `IMAGE_DEFAULT_TYPE` | `default` | Default manifest key for `--flash download` |
+| `IMAGE_1_TYPE` … `IMAGE_4_TYPE` | _(empty)_ | Per-node manifest key overrides |
+| `MANIFEST_FILE` | `./images-manifest.kv` | Image manifest for download mode |
+| `IMAGE_CACHE_DIR` | `./image-cache` | Cache directory for downloaded images |
+| `BMC_FIRMWARE_MODE` | `skip` | `skip` / `check` / `upgrade` — controls A0 |
+| `BMC_MANIFEST_FILE` | `./bmc-manifest.kv` | BMC firmware manifest for A0 |
+| `BMC_HOST` | _(auto)_ | Set by A1; passed to `tpi` as `--host` |
 
 ---
 
@@ -282,6 +352,73 @@ The Phase A registry is HTTP-only. Add `rk1-node1:5000` to Docker's `insecure-re
 Then `sudo systemctl restart docker`.
 
 **Reruns:** Safe to rerun with `--from <stage>` after fixing whatever failed.
+
+---
+
+### Flashing compute modules
+
+Stage A3 supports four modes, controlled by `--flash MODE` or `FLASH_MODE=` in the config:
+
+| Mode | What happens |
+|------|-------------|
+| `skip` _(default)_ | Assumes nodes already have a working OS; proceeds to A4 |
+| `local` | Calls `tpi flash -n N --local` per node (BMC reads from its own storage) |
+| `image` | Calls `tpi flash -n N --image-path FILE` per node; use `--image FILE` for all nodes or `--image-1 FILE` … `--image-4 FILE` for per-node overrides |
+| `download` | Downloads image from `images-manifest.kv`, verifies SHA256, caches in `./image-cache/`; re-downloads if the cached file's checksum no longer matches |
+
+**Example manifest** (`images-manifest.kv.example`):
+
+```
+default.description=Ubuntu 22.04 for RK1
+default.url=https://example.com/ubuntu-22.04-arm64+rk1.img.xz
+default.sha256=<sha256 of the file at that URL>
+```
+
+Copy to `images-manifest.kv`, fill in real values, then:
+
+```bash
+./bootstrap-turingpi-cluster.exp --phase A --flash download --manifest images-manifest.kv
+```
+
+---
+
+### BMC firmware (A0)
+
+Stage A0 runs before A1 and handles BMC firmware. It is skipped by default.
+
+```bash
+# Check whether the running BMC version matches the manifest
+./bootstrap-turingpi-cluster.exp --from A0_bmc_firmware --to A0_bmc_firmware \
+    --bmc-firmware check --bmc-manifest bmc-manifest.kv
+
+# Upgrade if outdated
+./bootstrap-turingpi-cluster.exp --from A0_bmc_firmware --to A0_bmc_firmware \
+    --bmc-firmware upgrade --bmc-manifest bmc-manifest.kv
+
+# Dry-run (never touches the BMC)
+./bootstrap-turingpi-cluster.exp --dry-run --from A0_bmc_firmware --to A0_bmc_firmware \
+    --bmc-firmware upgrade
+```
+
+Populate `bmc-manifest.kv` from `bmc-manifest.kv.example` with the firmware URL and SHA256 from the [TuringPi BMC-Firmware releases](https://github.com/turing-machines/BMC-Firmware/releases).
+
+---
+
+### Testing
+
+```bash
+./tests/run-ci.sh            # Suite 1 (dry-run) + Suite 2 (mock), no hardware
+./tests/run-ci.sh --suite 1  # dry-run only
+./tests/run-ci.sh --suite 2  # mock only
+
+./tests/run-hardware.sh --cycles 2          # two bootstrap→teardown cycles on real hardware
+./tests/run-hardware.sh --flash-cycle       # also run a download-flash cycle
+./tests/run-hardware.sh --bmc-check         # include A0 BMC version check
+```
+
+The CI suite (Suites 1+2, 27 tests) runs automatically in GitHub Actions on every
+push and PR. Suite 3 (hardware) runs manually before significant merges. See
+[TEST_STATUS.md](TEST_STATUS.md) for the full path map and coverage details.
 
 ---
 
@@ -337,9 +474,10 @@ This project intentionally splits responsibilities between bootstrap automation 
 
 The Expect script (`bootstrap-turingpi-cluster.exp`) is only responsible for one-time or out-of-band setup that cannot be declaratively managed inside Kubernetes:
 
+- Optionally check or upgrade BMC firmware (A0)
 - Discover the BMC and RK1 nodes on the LAN
 - Power cycle nodes to ensure a clean baseline
-- (Optionally) flash OS images via USB/web (stubbed)
+- Optionally flash OS images (local, from disk, or downloaded with SHA256 verification)
 - SSH into nodes with default credentials and update passwords
 - Assign stable hostnames (`rk1-nodeX`) and reboot
 - Update `/etc/hosts` on the laptop with node mappings
