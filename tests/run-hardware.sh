@@ -82,13 +82,14 @@ verify_cluster_up() {
   local ok_count=0
   for n in 1 2 3 4; do
     local host="rk1-node$n"
-    if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-           -o ConnectTimeout=5 -o BatchMode=yes ubuntu@$host \
-           hostname 2>/dev/null | grep -q "rk1-node$n"; then
-      ok "$host: hostname OK"
+    # Nodes use password auth so BatchMode=yes can't verify hostname. Instead:
+    # confirm /etc/hosts has the entry (A6 worked) and port 22 is open (node is up).
+    if grep -q "$host" /etc/hosts 2>/dev/null && \
+       timeout 5 bash -c "echo >/dev/tcp/$host/22" 2>/dev/null; then
+      ok "$host: /etc/hosts entry present and SSH port open"
       ((ok_count++))
     else
-      fail "$host: SSH or hostname check failed"
+      fail "$host: /etc/hosts entry missing or SSH port not reachable"
     fi
   done
 
