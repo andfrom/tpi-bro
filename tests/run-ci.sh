@@ -94,9 +94,19 @@ cat > "$TMP/bmc-config.kv" <<EOF
 STATE_FILE=$TMP/bmc-state.kv
 EOF
 
-# Config for D09 (unknown image type)
+# Config for D09 (unknown image type, download mode)
 cat > "$TMP/type-override.kv" <<EOF
 FLASH_MODE=download
+IMAGE_1_TYPE=nonexistent_type
+EOF
+
+# Config for D22 (explicit BMC_SDCARD_DEV)
+cat > "$TMP/bmc-sdcard-override.kv" <<EOF
+BMC_SDCARD_DEV=/dev/mmcblk0p1
+EOF
+
+# Config for D23 (unknown image type, bmc mode)
+cat > "$TMP/bmc-type-override.kv" <<EOF
 IMAGE_1_TYPE=nonexistent_type
 EOF
 
@@ -201,10 +211,27 @@ if [[ "$SUITE" == "all" || "$SUITE" == "1" ]]; then
     0 "download + verify SHA256" "" \
     $BOOTSTRAP --dry-run --from A0_bmc_firmware --to A0_bmc_firmware --bmc-firmware upgrade
 
-  run_test "D21 A3 bmc dry-run" \
-    0 "tpi flash -n 1 --local --image-path" "" \
+  run_test "D21 A3 bmc dry-run (auto-detect)" \
+    0 "auto-detect" "" \
     $BOOTSTRAP --dry-run --from A3_flash_optional --to A3_flash_optional \
       --flash bmc --manifest images-manifest.kv.example
+
+  run_test "D22 A3 bmc dry-run (explicit BMC_SDCARD_DEV)" \
+    0 "/dev/mmcblk0p1" "auto-detect" \
+    $BOOTSTRAP --dry-run --from A3_flash_optional --to A3_flash_optional \
+      --flash bmc --manifest images-manifest.kv.example \
+      --config "$TMP/bmc-sdcard-override.kv"
+
+  run_test "D23 A3 bmc unknown type → die" \
+    1 "Unknown image type" "" \
+    $BOOTSTRAP --dry-run --from A3_flash_optional --to A3_flash_optional \
+      --flash bmc --manifest images-manifest.kv.example \
+      --config "$TMP/bmc-type-override.kv"
+
+  run_test "D24 A3 bmc missing manifest → die" \
+    1 "Manifest file not found" "" \
+    $BOOTSTRAP --dry-run --from A3_flash_optional --to A3_flash_optional \
+      --flash bmc --manifest /nonexistent.kv
 fi
 
 # ── Suite 2 — Mock / fault injection ─────────────────────────────────────────
