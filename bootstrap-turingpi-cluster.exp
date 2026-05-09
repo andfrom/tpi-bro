@@ -106,12 +106,41 @@ proc state_put {mVar key val} {
 
 # SSH helpers
 proc ssh_ok {ip user pass cmd} {
-  spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$ip $cmd
+  spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=3 -o BatchMode=no $user@$ip $cmd
   expect {
     -re "(P|p)assword:" { send "$pass\r"; exp_continue }
     -re "Are you sure.*" { send "yes\r"; exp_continue }
-    timeout { return 1 }
+    timeout { catch {close}; return 1 }
     eof {}
+  }
+  return 0
+}
+
+# Poll until a host not in $baseline appears on $subnet with SSH open and accepting $user/$pass.
+# Returns the IP as soon as it's found; returns "" if $deadline_s elapses.
+# No explicit sleep — each nmap scan takes a few seconds and provides natural pacing.
+proc wait_for_new_ssh_host {baseline subnet user pass deadline_s} {
+  set deadline [expr {[clock seconds] + $deadline_s}]
+  while {[clock seconds] < $deadline} {
+    set current [discover_nodes $subnet]
+    foreach cand $current {
+      if {[lsearch -exact $baseline $cand] >= 0} continue
+      if {[ssh_ok $cand $user $pass "echo ok"] == 0} { return $cand }
+    }
+  }
+  return ""
+}
+
+# Poll until SSH on $ip is unreachable (node has shut down).
+# Returns 1 if node went away within $deadline_s, 0 if it didn't.
+proc wait_for_ssh_gone {ip user deadline_s} {
+  set deadline [expr {[clock seconds] + $deadline_s}]
+  while {[clock seconds] < $deadline} {
+    set rc [catch {exec ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                            -o ConnectTimeout=2 -o BatchMode=yes \
+                            $user@$ip echo ping 2>/dev/null} out]
+    if {$rc} { return 1 }
   }
   return 0
 }
@@ -150,8 +179,21 @@ proc check_registry_http_up {ip port} {
   return [expr {[string match *repositories* $out]}]
 }
 
-# Power control & helpers (placeholders)
-proc tpi_power {node action} { say "tpi power $action --node $node   (placeholder)" }
+# Power control via tpi CLI (installed on operator's laptop, talks to BMC)
+# node: integer 1-N, or the string "all"
+# action: "on" | "off"
+proc tpi_power {node action} {
+  if {$node eq "all"} {
+    say "  BMC: tpi power $action"
+    set rc [catch {exec tpi power $action} out]
+  } else {
+    say "  BMC: tpi power $action -n $node"
+    set rc [catch {exec tpi power $action -n $node} out]
+  }
+  if {$rc} { say "  WARNING: tpi power $action: $out"; return 1 }
+  if {[string trim $out] ne ""} { say "  $out" }
+  return 0
+}
 
 # Discovery helpers
 proc find_bmc {subnet} {
@@ -235,8 +277,10 @@ proc stage_A1_find_bmc {dry stateRef} {
 
 # ----- Stage  A2 -------
 proc stage_A2_poweroff_all {dry stateRef} {
-  say "A2: Powering OFF all nodes (tpi placeholder)"
-  if {$dry} { say "DRY: tpi power off 1..$::NODE_COUNT"; return }
+  say "A2: Powering OFF all nodes via BMC"
+  if {$dry} { say "DRY: tpi power off  (all nodes at once)"; return }
+  tpi_power "all" "off"
+  say "A2: All nodes powered off."
 }
 
 # ----- Stage  A3 -------
@@ -249,24 +293,39 @@ proc stage_A3_flash_optional {dry stateRef} {
 # ----- Stage  A4 -------
 proc stage_A4_power_on_and_discover {dry stateRef} {
   upvar $stateRef state
-  say "A4: Power ON sequentially and discover IPs"
+  say "A4: Power ON nodes sequentially and discover IPs"
+
   for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
-    set key "${::NODE_PREFIX}$i"
-    if {[state_get $state $key ""] ne ""} { say "  $key already mapped"; continue }
-    say "  powering on $key (placeholder)"
-    if {$dry} { say "DRY: would tpi power on $i; discover via nmap/ssh"; continue }
-    set ip ""
-    for {set tries 0} {$tries < 24} {incr tries} {
-      set found [discover_nodes $::SUBNET]
-      foreach cand $found {
-        # try default ssh
-        if {[ssh_ok $cand $::DEFAULT_USER $::DEFAULT_PASS "echo ok"] == 0} { set ip $cand; break }
-      }
-      if {$ip ne ""} { break }
-      sleep 5
+    set name "${::NODE_PREFIX}$i"
+    set known [state_get $state $name ""]
+    if {$known ne ""} { say "  $name: already mapped to $known — skipping"; continue }
+
+    if {$dry} {
+      say "DRY: tpi power on -n $i; scan $::SUBNET for new SSH host; map to $name"
+      continue
     }
-    if {$ip eq ""} { die "Could not discover IP for $key; supply mapping and rerun --from A4" }
-    state_put state "${NODE_PREFIX}$i" $ip
+
+    # Snapshot which IPs are already on the subnet so we can detect the newcomer.
+    say "  Scanning baseline before powering on $name…"
+    set baseline [discover_nodes $::SUBNET]
+    if {[llength $baseline]} {
+      say "  Existing hosts: [join $baseline {, }]"
+    } else {
+      say "  No existing SSH hosts on subnet."
+    }
+
+    tpi_power $i "on"
+
+    # Wait for the new node to appear. No fixed sleep — each nmap scan in
+    # wait_for_new_ssh_host takes a few seconds and provides natural pacing.
+    say "  Waiting for $name to boot and appear on network (up to 150 s)…"
+    set ip [wait_for_new_ssh_host $baseline $::SUBNET $::DEFAULT_USER $::DEFAULT_PASS 150]
+
+    if {$ip eq ""} {
+      die "Could not discover IP for $name within 150 s.\nCheck: power LED on, DHCP running, subnet correct.\nFix then rerun --from A4, or add \"$name=<ip>\" to $::STATE_FILE and rerun --from A5."
+    }
+    state_put state $name $ip
+    say "  $name → $ip"
   }
 }
 

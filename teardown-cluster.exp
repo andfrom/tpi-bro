@@ -132,16 +132,30 @@ proc ssh_shell {ip user pass commands} {
 proc ssh_reachable {ip user pass} {
   set rc [catch {
     spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -o ConnectTimeout=5 $user@$ip "echo ok"
+              -o ConnectTimeout=3 -o BatchMode=no $user@$ip "echo ok"
     expect {
       -re "(P|p)assword:" { send "$pass\r"; exp_continue }
       -re "Are you sure.*" { send "yes\r"; exp_continue }
       "ok"    { return 0 }
-      timeout { return 1 }
+      timeout { catch {close}; return 1 }
       eof     { return 1 }
     }
   } err]
   if {$rc} { return 1 }
+  return 0
+}
+
+# Poll until SSH on $ip stops responding (node has shut down).
+# Returns 1 if node went away within $deadline_s, 0 if it didn't.
+# No explicit sleep — each failed SSH attempt takes ~ConnectTimeout seconds.
+proc wait_for_ssh_gone {ip user deadline_s} {
+  set deadline [expr {[clock seconds] + $deadline_s}]
+  while {[clock seconds] < $deadline} {
+    set rc [catch {exec ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                            -o ConnectTimeout=2 -o BatchMode=yes \
+                            $user@$ip echo ping 2>/dev/null} out]
+    if {$rc} { return 1 }
+  }
   return 0
 }
 
@@ -355,17 +369,19 @@ proc stage_T7_poweroff_nodes {dry stateRef} {
     set name "${::NODE_PREFIX}$i"
     set ip [state_get $state $name ""]
     if {$ip eq ""} { say "  $name: IP unknown — skipping graceful shutdown"; continue }
-    if {$dry} { say "DRY: ssh $name: sudo poweroff"; continue }
+    if {$dry} { say "DRY: ssh $name: sudo poweroff; wait for SSH to drop"; continue }
     say "  $name ($ip): graceful shutdown…"
     catch {ssh_shell $ip $::DEFAULT_USER $pass [list "sudo poweroff"]}
+    # Wait for SSH to become unreachable — confirms the OS has actually shut down.
+    # Each failed connection attempt takes ~ConnectTimeout s, providing natural pacing.
+    if {[wait_for_ssh_gone $ip $::DEFAULT_USER 60]} {
+      say "  $name: down"
+    } else {
+      say "  $name: still reachable after 60 s — BMC will cut power anyway"
+    }
   }
 
-  if {!$dry} {
-    say "  waiting 10s for OS shutdown…"
-    sleep 10
-  }
-
-  # BMC hard power-off (idempotent even if nodes already off)
+  # BMC hard power-off — idempotent even if nodes already off
   if {$dry} {
     say "DRY: tpi power off  (all nodes)"
   } else {
