@@ -236,14 +236,16 @@ set dryrun 0
 set fromStage ""
 set toStage ""
 set phase ""
+set rediscover 0
 for {set i 0} {$i < $argc} {incr i} {
   set a [lindex $argv $i]
   switch -- $a {
-    "--dry-run" { set dryrun 1 }
-    "--from"    { incr i; set fromStage [lindex $argv $i] }
-    "--to"      { incr i; set toStage   [lindex $argv $i] }
-    "--phase"   { incr i; set phase     [lindex $argv $i] }
-    "--flash"   { incr i; set FLASH_MODE [lindex $argv $i] }
+    "--dry-run"    { set dryrun 1 }
+    "--from"       { incr i; set fromStage [lindex $argv $i] }
+    "--to"         { incr i; set toStage   [lindex $argv $i] }
+    "--phase"      { incr i; set phase     [lindex $argv $i] }
+    "--flash"      { incr i; set FLASH_MODE [lindex $argv $i] }
+    "--rediscover" { set rediscover 1 }
     "--help" -
     "--usage" { print_help; exit 0 }
     default { }
@@ -291,7 +293,12 @@ proc stage_A1_find_bmc {dry stateRef} {
   }
   state_put state "bmc_ip" $bmc
   set ::BMC_HOST $bmc
-  say "BMC: $bmc"
+  set bmc_mac [string trim [sh "ip neigh show $bmc 2>/dev/null | grep -oE '([0-9a-f]{2}:)\{5\}[0-9a-f]\{2\}'"]]
+  if {$bmc_mac ne ""} { state_put state "bmc_mac" $bmc_mac }
+  say "BMC: $bmc  (MAC $bmc_mac)"
+  # Pin turingpi.local in /etc/hosts so tpi works even when mDNS fails.
+  set rc [catch {sh "sudo [file dirname [info script]]/bootstrap-host-helper.sh hosts-append $bmc turingpi.local"} out]
+  if {$rc} { say "  WARNING: could not update /etc/hosts for BMC: $out" } else { say "  /etc/hosts: $bmc turingpi.local" }
 }
 
 # ----- Stage  A2 -------
@@ -344,8 +351,31 @@ proc stage_A4_power_on_and_discover {dry stateRef} {
       die "Could not discover IP for $name within 150 s.\nCheck: power LED on, DHCP running, subnet correct.\nFix then rerun --from A4, or add \"$name=<ip>\" to $::STATE_FILE and rerun --from A5."
     }
     state_put state $name $ip
-    say "  $name → $ip"
+
+    # Extract MAC from the laptop's ARP table (populated by the SSH probe above).
+    # Used to help operator configure static DHCP reservations in their router.
+    set mac [string trim [sh "ip neigh show $ip 2>/dev/null | grep -oE '([0-9a-f]{2}:)\{5\}[0-9a-f]\{2\}'"]]
+    if {$mac ne ""} {
+      state_put state "${name}_mac" $mac
+      say "  $name → $ip  (MAC $mac)"
+    } else {
+      say "  $name → $ip"
+    }
   }
+
+  # Print DHCP reservation summary so the operator can lock in stable IPs.
+  say "---"
+  say "DHCP reservation summary — configure in your router for stable IPs after power cycles:"
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+    set name "${::NODE_PREFIX}$i"
+    set ip  [state_get $state $name    "?"]
+    set mac [state_get $state "${name}_mac" "unknown"]
+    say "  $name  MAC=$mac  →  $ip"
+  }
+  set bmc_ip  [state_get $state "bmc_ip"  "?"]
+  set bmc_mac [state_get $state "bmc_mac" "unknown"]
+  say "  turingpi (BMC)  MAC=$bmc_mac  →  $bmc_ip"
+  say "---"
 }
 
 # ----- Stage  A5 -------
@@ -441,6 +471,96 @@ proc stage_A7_ephemeral_registry_phaseA {dry stateRef} {
 }
 
 
+# ---------- Rediscover ----------
+# Scans the subnet, identifies every node by its SSH hostname, updates the state
+# file, and rewrites the node entries in /etc/hosts.  No power cycling, no
+# password changes.  Handles IP drift after DHCP reassignment.
+# Also re-discovers the BMC and refreshes the turingpi.local /etc/hosts entry.
+proc do_rediscover {dry stateRef} {
+  upvar $stateRef state
+  say "Rediscover mode: scanning $::SUBNET for nodes and BMC…"
+
+  if {$dry} {
+    say "DRY: would scan $::SUBNET; identify nodes by SSH hostname; update state + /etc/hosts"
+    return
+  }
+
+  if {$::NEW_PASS eq ""} {
+    set ::NEW_PASS [ask_secret "Current node password: "]
+  }
+
+  # ---- Re-discover BMC ----
+  say "  Scanning for BMC…"
+  set bmc [find_bmc $::SUBNET]
+  if {$bmc ne ""} {
+    set old_bmc [state_get $state "bmc_ip" ""]
+    if {$old_bmc ne $bmc} { say "  BMC: $old_bmc → $bmc (updated)" } else { say "  BMC: $bmc (unchanged)" }
+    state_put state "bmc_ip" $bmc
+    set ::BMC_HOST $bmc
+    set bmc_mac [string trim [sh "ip neigh show $bmc 2>/dev/null | grep -oE '([0-9a-f]{2}:)\{5\}[0-9a-f]\{2\}'"]]
+    if {$bmc_mac ne ""} { state_put state "bmc_mac" $bmc_mac }
+  } else {
+    say "  WARNING: BMC not found on subnet — turingpi.local not updated"
+  }
+
+  # ---- Re-discover nodes by SSH hostname ----
+  say "  Scanning for SSH hosts…"
+  set candidates [discover_nodes $::SUBNET]
+  say "  Found [llength $candidates] SSH host(s)"
+
+  set name_to_ip [dict create]
+  foreach ip $candidates {
+    set found_name ""
+    catch {
+      spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                -o ConnectTimeout=3 $::DEFAULT_USER@$ip "hostname"
+      expect {
+        -re "(P|p)assword:"   { send "$::NEW_PASS\r"; exp_continue }
+        -re "Are you sure.*"  { send "yes\r"; exp_continue }
+        -re {([^\r\n]+)\r?\n} { set found_name $expect_out(1,string); exp_continue }
+        timeout               { catch {close} }
+        eof                   { }
+      }
+    }
+    set found_name [string trim $found_name]
+    if {$found_name ne ""} { dict set name_to_ip $found_name $ip }
+  }
+
+  # ---- Update state and build fresh /etc/hosts args ----
+  set hosts_args {}
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+    set name "${::NODE_PREFIX}$i"
+    if {[dict exists $name_to_ip $name]} {
+      set ip [dict get $name_to_ip $name]
+      set old [state_get $state $name "none"]
+      if {$old ne $ip} { say "  $name: $old → $ip" } else { say "  $name: $ip (unchanged)" }
+      state_put state $name $ip
+      lappend hosts_args $ip $name
+      # Refresh MAC
+      set mac [string trim [sh "ip neigh show $ip 2>/dev/null | grep -oE '([0-9a-f]{2}:)\{5\}[0-9a-f]\{2\}'"]]
+      if {$mac ne ""} { state_put state "${name}_mac" $mac }
+    } else {
+      say "  WARNING: $name not found — keeping existing state entry"
+    }
+  }
+
+  # ---- Rewrite /etc/hosts (remove stale, add fresh) ----
+  set node_names {}
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} { lappend node_names "${::NODE_PREFIX}$i" }
+  set helper "sudo [file dirname [info script]]/bootstrap-host-helper.sh"
+  sh "$helper hosts-remove [join $node_names { }] turingpi.local"
+  if {[llength $hosts_args] > 0} {
+    set rc [catch {sh "$helper hosts-append [join $hosts_args { }]"} out]
+    if {$rc} { say "WARNING: /etc/hosts node update failed: $out" }
+  }
+  if {$bmc ne ""} {
+    set rc [catch {sh "$helper hosts-append $bmc turingpi.local"} out]
+    if {$rc} { say "WARNING: /etc/hosts BMC update failed: $out" }
+  }
+
+  say "Rediscovery complete."
+}
+
 # ---------- run ----------
 # Show help if no args and no state yet (friendly)
 if {$argc == 0} {
@@ -454,6 +574,13 @@ if {$BMC_HOST eq "" && [dict exists $state "bmc_ip"]} {
   set BMC_HOST [dict get $state "bmc_ip"]
   say "Restored BMC host from state: $BMC_HOST"
 }
+if {$rediscover} {
+  do_rediscover $dryrun state
+  if {!$dryrun} { kv_save $STATE_FILE $state }
+  say "Done."
+  exit 0
+}
+
 set startIdx 0
 set endIdx [expr {[llength $STAGES]-1}]
 # (already set via --from/--to parsing above)

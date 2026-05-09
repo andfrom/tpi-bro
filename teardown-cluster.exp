@@ -412,12 +412,13 @@ proc stage_T5_reset_hostnames {dry stateRef} {
   }
 }
 
-# T6: Remove rk1-nodeN entries from the laptop's /etc/hosts.
+# T6: Remove rk1-nodeN and turingpi.local entries from the laptop's /etc/hosts.
 proc stage_T6_clean_laptop_hosts {dry stateRef} {
   upvar $stateRef state
-  say "T6: Remove node entries from /etc/hosts"
+  say "T6: Remove node and BMC entries from /etc/hosts"
   set names {}
   for {set i 1} {$i <= $::NODE_COUNT} {incr i} { lappend names "${::NODE_PREFIX}$i" }
+  lappend names "turingpi.local"
   if {$dry} {
     say "DRY: would run: sudo bootstrap-host-helper.sh hosts-remove [join $names { }]"
     return
