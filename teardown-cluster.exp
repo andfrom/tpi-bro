@@ -383,6 +383,7 @@ proc stage_T4_reset_passwords {dry stateRef} {
       say "  $name ($ip): password reset to $::DEFAULT_PASS"
     }
   }
+  if {!$dry} { set ::CURRENT_PASS $::DEFAULT_PASS }
 }
 
 # T5: Reset hostnames back to ubuntu on every node.
@@ -396,11 +397,8 @@ proc stage_T5_reset_hostnames {dry stateRef} {
     set name "${::NODE_PREFIX}$i"
     set ip [state_get $state $name ""]
     if {$ip eq ""} { say "  $name: IP unknown — skipping"; continue }
-    # Use CURRENT_PASS if password reset (T4) didn't complete yet, otherwise DEFAULT_PASS.
-    # We always run T5 after T4, so the password is now DEFAULT_PASS.
-    # Guard: if run standalone (--from T5), we may still need CURRENT_PASS.
-    set pass $::DEFAULT_PASS
-    if {$::CURRENT_PASS ne ""} { set pass $::CURRENT_PASS }
+    set pass $::CURRENT_PASS
+    if {$pass eq ""} { set pass $::DEFAULT_PASS }
     set cmds [list \
       "sudo hostnamectl set-hostname ubuntu" \
       {sudo sed -i "/\brk1-node[0-9]*\b/d" /etc/hosts} \
@@ -443,9 +441,8 @@ proc stage_T7_poweroff_nodes {dry stateRef} {
   upvar $stateRef state
   say "T7: Powering down nodes"
 
-  # After T4 the password is DEFAULT_PASS.  If T4 was skipped, fall back to CURRENT_PASS.
-  set pass $::DEFAULT_PASS
-  if {$::CURRENT_PASS ne ""} { set pass $::CURRENT_PASS }
+  set pass $::CURRENT_PASS
+  if {$pass eq ""} { set pass $::DEFAULT_PASS }
 
   for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
     set name "${::NODE_PREFIX}$i"
