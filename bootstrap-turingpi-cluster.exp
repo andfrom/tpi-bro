@@ -49,7 +49,7 @@ set STAGES {
 
 # ---------- utils ----------
 proc say {msg} { puts "\n==> $msg" }
-proc sh {cmd} { set f [open "|$cmd 2>@1" r]; set out [read $f]; catch {close $f}; return $out }
+proc sh {cmd} { set f [open [list | bash -c $cmd 2>@1] r]; set out [read $f]; catch {close $f}; return $out }
 proc ask_secret {prompt} { stty -echo; send_user $prompt; expect_user -re "(.*)\n"; stty echo; send_user "\n"; return $expect_out(1,string) }
 proc die {msg} { puts stderr "ERROR: $msg"; exit 1 }
 
