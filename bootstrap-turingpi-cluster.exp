@@ -341,13 +341,13 @@ proc tpi_flash_node {node_idx img_or_local} {
 }
 
 # Run a short command on the BMC via SSH. Returns {exit_code output}.
-proc bmc_cmd {cmd} {
+proc bmc_cmd {cmd {timeout_s 30}} {
   set bmc $::BMC_HOST
   if {$bmc eq ""} { die "BMC host not known. Run A1 first or set BMC_HOST in config." }
   set output ""
   spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=5 -o BatchMode=no $::BMC_USER@$bmc $cmd
-  set timeout 30
+  set timeout $timeout_s
   expect {
     -re "(P|p)assword:" {
       if {$::BMC_PASS ne ""} { send "$::BMC_PASS\r"; exp_continue } \
@@ -883,8 +883,8 @@ proc stage_A3_flash_optional {dry stateRef} {
         # Check if already cached on BMC with correct SHA256
         lassign [bmc_cmd "test -f [list $dest] && echo exists || echo missing"] _rc4 exists_out
         if {[string match "*exists*" $exists_out]} {
-          say "  BMC cache hit: $dest — verifying SHA256…"
-          lassign [bmc_cmd "sha256sum [list $dest]"] _rc5 sum_out
+          say "  BMC cache hit: $dest — verifying SHA256 (may take a minute)…"
+          lassign [bmc_cmd "sha256sum [list $dest]" 300] _rc5 sum_out
           set actual [string tolower [string trim [lindex [split $sum_out " "] 0]]]
           if {$actual eq $expected} {
             say "  SHA256 OK"
@@ -904,8 +904,8 @@ proc stage_A3_flash_optional {dry stateRef} {
           die "BMC download failed for type '$type' (exit $dl_rc)"
         }
 
-        say "  Verifying SHA256 on BMC…"
-        lassign [bmc_cmd "sha256sum [list $dest]"] _rc6 sum_out2
+        say "  Verifying SHA256 on BMC (may take a minute on large images)…"
+        lassign [bmc_cmd "sha256sum [list $dest]" 300] _rc6 sum_out2
         set actual [string tolower [string trim [lindex [split $sum_out2 " "] 0]]]
         if {$actual ne $expected} {
           bmc_cmd "rm -f [list $dest]"
