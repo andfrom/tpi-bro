@@ -22,6 +22,7 @@
 #   --help, --usage          Show this message
 
 # ---------- Defaults ----------
+set SUBNET "192.168.1.0/24"
 set NODE_COUNT 4
 set NODE_PREFIX "rk1-node"
 set DEFAULT_USER "ubuntu"
@@ -32,6 +33,7 @@ set REGISTRY_PORT 5000
 set STATE_FILE "./bootstrap-state.kv"
 set REMOVE_DOCKER 0
 set KEEP_HOSTNAME 0
+set BMC_HOST ""                  ;# restored from state; passed as --host to tpi
 
 # ---------- Stage Registry ----------
 set STAGES {
@@ -145,6 +147,50 @@ proc ssh_reachable {ip user pass} {
   return 0
 }
 
+# Scan subnet for IPs that have port 22 open.
+proc discover_nodes {subnet} {
+  set ips {}
+  set out [sh "nmap -sn $subnet | grep 'Nmap scan report for'"]
+  foreach line [split $out "\n"] {
+    if {[regexp {Nmap scan report for \S+ \(([\d\.]+)\)} $line -> ip]} {
+      lappend ips $ip
+    } elseif {[regexp {Nmap scan report for ([\d\.]+)} $line -> ip]} {
+      lappend ips $ip
+    }
+  }
+  set good {}
+  foreach ip $ips {
+    set chk [sh "timeout 1 bash -c 'echo >/dev/tcp/$ip/22' 2>/dev/null && echo ok || echo no"]
+    if {[string match *ok* $chk]} { lappend good $ip }
+  }
+  return $good
+}
+
+# SSH to $ip, run hostname, return 1 if it matches $name.
+proc node_at_ip {ip name user pass} {
+  set found ""
+  catch {
+    spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=3 $user@$ip "hostname"
+    expect {
+      -re "(P|p)assword:"    { send "$pass\r"; exp_continue }
+      -re "Are you sure.*"   { send "yes\r";   exp_continue }
+      -re {([^\r\n]+)\r?\n}  { set found $expect_out(1,string); exp_continue }
+      timeout                { catch {close} }
+      eof                    { }
+    }
+  }
+  return [expr {[string trim $found] eq $name}]
+}
+
+# Scan $subnet and return the IP whose SSH hostname == $name, or "" if not found.
+proc find_node_ip {name subnet user pass} {
+  foreach ip [discover_nodes $subnet] {
+    if {[node_at_ip $ip $name $user $pass]} { return $ip }
+  }
+  return ""
+}
+
 # Poll until SSH on $ip stops responding (node has shut down).
 # Returns 1 if node went away within $deadline_s, 0 if it didn't.
 # No explicit sleep — each failed SSH attempt takes ~ConnectTimeout seconds.
@@ -199,28 +245,22 @@ if {$toStage ne ""} {
 
 # ---------- Stage Implementations ----------
 
-# T1: Load state file; verify we have node IPs; prompt for current password.
+# T1: Locate every node — try the stored IP first, fall back to subnet scan
+#     if the stored IP is stale (DHCP may have reassigned it).
+#     State file is optional: if missing, scan-only mode is used.
 proc stage_T1_load_state {dry stateRef} {
   upvar $stateRef state
-  say "T1: Loading state from $::STATE_FILE"
+  say "T1: Locating nodes (verify stored IPs; rescan on mismatch)"
 
-  if {![file exists $::STATE_FILE]} {
-    die "No state file found at $::STATE_FILE — nothing to tear down, or run from the repo root."
-  }
-
-  set missing {}
-  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
-    set key "${::NODE_PREFIX}$i"
-    set ip [state_get $state $key ""]
-    if {$ip eq ""} { lappend missing $key }
-  }
-  if {[llength $missing] > 0} {
-    say "WARNING: IPs missing for: [join $missing {, }]"
-    say "These nodes will be skipped in SSH stages."
+  if {[file exists $::STATE_FILE]} {
+    say "  State file found."
+  } else {
+    say "  No state file — will scan $::SUBNET to locate nodes by hostname."
   }
 
   if {$dry} {
     say "DRY: would prompt for current node password"
+    say "DRY: for each node: try stored IP, fall back to nmap+hostname scan"
     return
   }
 
@@ -230,22 +270,58 @@ proc stage_T1_load_state {dry stateRef} {
   if {$::CURRENT_PASS eq ""} {
     die "No password supplied — cannot SSH into nodes."
   }
-  say "T1: state loaded; [llength [dict keys $state]] keys found."
+
+  set located 0
+  set lost {}
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+    set name "${::NODE_PREFIX}$i"
+    set stored [state_get $state $name ""]
+
+    # Try stored IP first — avoids a full subnet scan when IPs are stable
+    if {$stored ne "" && [node_at_ip $stored $name $::DEFAULT_USER $::CURRENT_PASS]} {
+      say "  $name: confirmed at $stored"
+      incr located
+      continue
+    }
+
+    # Stored IP is stale or missing — scan the subnet and identify by hostname
+    if {$stored ne ""} {
+      say "  $name: $stored did not respond — scanning $::SUBNET…"
+    } else {
+      say "  $name: no stored IP — scanning $::SUBNET…"
+    }
+    set ip [find_node_ip $name $::SUBNET $::DEFAULT_USER $::CURRENT_PASS]
+    if {$ip ne ""} {
+      say "  $name: found at $ip (updating state)"
+      dict set state $name $ip
+      incr located
+    } else {
+      say "  WARNING: $name not found — may be powered off or have a different password."
+      lappend lost $name
+    }
+  }
+
+  if {$located == 0} {
+    die "Could not locate any nodes. Check: nodes are powered on, password is correct, subnet is reachable."
+  }
+  if {[llength $lost] > 0} {
+    say "  SSH stages will be skipped for: [join $lost {, }]"
+  }
+  say "T1: $located/$::NODE_COUNT nodes located."
 }
 
-# T2: Verify SSH connectivity to all nodes using the current password.
+# T2: Report the resolved IP for each node (T1 already verified them).
+#     Any node T1 couldn't locate is flagged; subsequent stages skip it.
 proc stage_T2_verify_connectivity {dry stateRef} {
   upvar $stateRef state
-  say "T2: Verifying SSH connectivity"
+  say "T2: Node IP summary"
   for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
     set name "${::NODE_PREFIX}$i"
     set ip [state_get $state $name ""]
-    if {$ip eq ""} { say "  $name: IP unknown — skipping"; continue }
-    if {$dry} { say "DRY: would ssh $::DEFAULT_USER@$ip (with current password)"; continue }
-    if {[ssh_reachable $ip $::DEFAULT_USER $::CURRENT_PASS]} {
-      say "  $name ($ip): NOT reachable — check IP or password"
+    if {$ip eq ""} {
+      say "  $name: NOT FOUND — SSH stages will be skipped"
     } else {
-      say "  $name ($ip): OK"
+      say "  $name → $ip"
     }
   }
 }
@@ -382,12 +458,15 @@ proc stage_T7_poweroff_nodes {dry stateRef} {
   }
 
   # BMC hard power-off — idempotent even if nodes already off
+  set tpi_args [list tpi]
+  if {$::BMC_HOST ne ""} { lappend tpi_args --host $::BMC_HOST }
+  lappend tpi_args power off
   if {$dry} {
-    say "DRY: tpi power off  (all nodes)"
+    say "DRY: [join $tpi_args { }]  (all nodes)"
   } else {
-    say "  BMC: tpi power off"
-    catch {set out [sh "tpi power off"]}
-    say "  $out"
+    say "  BMC: [join $tpi_args { }]"
+    set rc [catch {exec {*}$tpi_args} out]
+    if {$rc} { say "  WARNING: $out" } else { say "  $out" }
   }
 }
 
@@ -418,6 +497,11 @@ if {$REMOVE_DOCKER} { say "  --remove-docker: Docker will be uninstalled from re
 if {$KEEP_HOSTNAME}  { say "  --keep-hostname: hostname reset skipped" }
 
 set state [kv_load $STATE_FILE]
+# Restore BMC_HOST from state so tpi commands work even if run non-interactively
+if {$BMC_HOST eq "" && [dict exists $state "bmc_ip"]} {
+  set BMC_HOST [dict get $state "bmc_ip"]
+  say "Restored BMC host from state: $BMC_HOST"
+}
 
 for {set idx $startIdx} {$idx <= $endIdx} {incr idx} {
   set s [lindex $STAGES $idx]

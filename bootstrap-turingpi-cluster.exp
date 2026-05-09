@@ -22,6 +22,7 @@ set REGISTRY_PORT 5000
 # Use a simple key=value state file
 set STATE_FILE "./bootstrap-state.kv"
 set FLASH_MODE "skip"           ;# usb|web|skip
+set BMC_HOST ""                 ;# set by A1 from nmap; passed as --host to tpi
 
 # ---------- Stage Registry ----------
 set STAGES {
@@ -182,17 +183,26 @@ proc check_registry_http_up {ip port} {
 # Power control via tpi CLI (installed on operator's laptop, talks to BMC)
 # node: integer 1-N, or the string "all"
 # action: "on" | "off"
+# Uses $::BMC_HOST if set, so mDNS failures don't stall the script.
 proc tpi_power {node action} {
-  if {$node eq "all"} {
-    say "  BMC: tpi power $action"
-    set rc [catch {exec tpi power $action} out]
-  } else {
-    say "  BMC: tpi power $action -n $node"
-    set rc [catch {exec tpi power $action -n $node} out]
-  }
-  if {$rc} { say "  WARNING: tpi power $action: $out"; return 1 }
+  set args [list tpi]
+  if {$::BMC_HOST ne ""} { lappend args --host $::BMC_HOST }
+  lappend args power $action
+  if {$node ne "all"} { lappend args -n $node }
+  say "  BMC: [join $args { }]"
+  set rc [catch {exec {*}$args} out]
+  if {$rc} { say "  WARNING: tpi power $action → $out"; return 1 }
   if {[string trim $out] ne ""} { say "  $out" }
   return 0
+}
+
+proc tpi_status {} {
+  set args [list tpi]
+  if {$::BMC_HOST ne ""} { lappend args --host $::BMC_HOST }
+  lappend args power status
+  set rc [catch {exec {*}$args} out]
+  if {$rc} { return "unknown ($out)" }
+  return $out
 }
 
 # Discovery helpers
@@ -266,12 +276,21 @@ if {$toStage ne ""}   { set j [stage_index $toStage];   if {$j < 0} { die "Unkno
 # ----- Stage  A1 -------
 proc stage_A1_find_bmc {dry stateRef} {
   upvar $stateRef state
-  if {[check_bmc_known $state]} { say "A1: BMC already known"; return }
+  if {[check_bmc_known $state]} {
+    set ::BMC_HOST [state_get $state "bmc_ip" ""]
+    say "A1: BMC already known at $::BMC_HOST"
+    return
+  }
   say "A1: Discovering BMC via nmap…"
   if {$dry} { say "DRY: would run nmap on $::SUBNET"; return }
   set bmc [find_bmc $::SUBNET]
-  if {$bmc eq ""} { say "Could not auto-detect BMC. Enter IP:"; expect_user -re "(.*)\n"; set bmc $expect_out(1,string) }
+  if {$bmc eq ""} {
+    say "Could not auto-detect BMC. Enter IP:"
+    expect_user -re "(.*)\n"
+    set bmc $expect_out(1,string)
+  }
   state_put state "bmc_ip" $bmc
+  set ::BMC_HOST $bmc
   say "BMC: $bmc"
 }
 
@@ -430,6 +449,11 @@ if {$argc == 0} {
 
 say "Starting bootstrap (dry-run=$dryrun, from=$fromStage, to=$toStage, phase=$phase, flash=$FLASH_MODE)…"
 set state [kv_load $STATE_FILE]
+# Restore BMC_HOST from a previous run so tpi commands work even if A1 is skipped
+if {$BMC_HOST eq "" && [dict exists $state "bmc_ip"]} {
+  set BMC_HOST [dict get $state "bmc_ip"]
+  say "Restored BMC host from state: $BMC_HOST"
+}
 set startIdx 0
 set endIdx [expr {[llength $STAGES]-1}]
 # (already set via --from/--to parsing above)
