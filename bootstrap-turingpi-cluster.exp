@@ -7,7 +7,9 @@
 #   --dry-run,
 #   --from/--to,
 #   --phase,
-#   --flash, and
+#   --flash, --image, --image-N,
+#   --manifest, --cache-dir,
+#   --bmc-firmware, --bmc-manifest, and
 #   --help / --usage
 
 # ---------- Defaults ----------
@@ -21,11 +23,21 @@ set REGISTRY_NODE_IDX 1
 set REGISTRY_PORT 5000
 # Use a simple key=value state file
 set STATE_FILE "./bootstrap-state.kv"
-set FLASH_MODE "skip"           ;# usb|web|skip
+set FLASH_MODE "skip"           ;# image|download|local|skip
+set IMAGE_DEFAULT ""            ;# image path for all nodes (image mode); overridden per-node via IMAGE_N
+set IMAGE_PATHS [dict create]   ;# node index → image path overrides (set via --image-N or config IMAGE_N)
+set IMAGE_DEFAULT_TYPE "default" ;# manifest image type for all nodes (download mode)
+set IMAGE_NODE_TYPES [dict create] ;# node index → manifest type overrides (config IMAGE_N_TYPE)
+set MANIFEST_FILE "./images-manifest.kv" ;# image manifest for download mode
+set IMAGE_CACHE_DIR "./image-cache"      ;# local cache for downloaded images
+set SERVER_NODE_IDX 1           ;# which node runs k3s server (Phase B reference; not used by flash itself)
+set BMC_FIRMWARE_MODE "skip"    ;# skip|check|upgrade  (A0 stage)
+set BMC_MANIFEST_FILE "./bmc-manifest.kv"  ;# version + download URL for BMC firmware
 set BMC_HOST ""                 ;# set by A1 from nmap; passed as --host to tpi
 
 # ---------- Stage Registry ----------
 set STAGES {
+  A0_bmc_firmware
   A1_find_bmc
   A2_poweroff_all
   A3_flash_optional
@@ -45,17 +57,47 @@ proc print_help {} {
   upvar STAGES STAGES
   puts "Turing Pi RK1 Bootstrap (resumable)\n"
   puts "Usage:"
-  puts "  ./bootstrap-turingpi.exp [--dry-run] [--phase A|B|C] [--from <STAGE>] [--to <STAGE>] [--flash usb|web|skip]"
+  puts "  ./bootstrap-turingpi-cluster.exp \[--config FILE\] \[--dry-run\] \[--phase A|B|C\]"
+  puts "    \[--from STAGE\] \[--to STAGE\] \[--flash image|download|local|skip\]"
+  puts "    \[--image PATH\] \[--image-1 PATH\] ... \[--image-4 PATH\]"
+  puts "    \[--bmc-firmware check|upgrade|skip\] \[--bmc-manifest FILE\]"
   puts ""
   puts "Options:"
+  puts "  --config FILE       Load key=value config (repeatable; last value wins)."
+  puts "                      Auto-loaded from ./bootstrap-config.kv if present and no --config given."
   puts "  --dry-run           Print actions without making changes"
-  puts "  --phase A|B|C       Shortcut to a stage range (A implemented here)"
-  puts "  --from <STAGE>      Start at a specific stage"
-  puts "  --to <STAGE>        Stop after a specific stage"
-  puts "  --flash usb|web|skip  Choose flashing mode (stubs in this version)"
+  puts "  --rediscover        Scan subnet, identify nodes by hostname, update state + /etc/hosts"
+  puts "  --phase A|B|C       Shortcut to a stage range (Phase A implemented here)"
+  puts "  --from STAGE        Start at a specific stage"
+  puts "  --to STAGE          Stop after a specific stage"
+  puts "  --flash image|download|local|skip"
+  puts "                      image:    upload a local image file via tpi flash --image-path"
+  puts "                      download: fetch image(s) from manifest, verify SHA256, then flash"
+  puts "                      local:    use image already on BMC SD card (tpi flash --local)"
+  puts "                      skip:     skip flashing entirely (default)"
+  puts "  --image PATH        Default OS image file for all nodes (--flash image)"
+  puts "  --image-N PATH      Per-node image override for node N (1-4); overrides --image."
+  puts "                      Example: --image worker.img --image-1 server.img"
+  puts "  --manifest FILE     Image manifest for node download mode (default: ./images-manifest.kv)"
+  puts "  --cache-dir DIR     Directory for cached downloads (default: ./image-cache)"
+  puts "  --bmc-firmware check|upgrade|skip"
+  puts "                      check:   report BMC version and warn if outdated (A0 stage)"
+  puts "                      upgrade: download + verify SHA256 + flash if outdated"
+  puts "                      skip:    skip BMC firmware check entirely (default)"
+  puts "  --bmc-manifest FILE BMC firmware manifest (default: ./bmc-manifest.kv)"
+  puts "                      Copy bmc-manifest.kv.example to get started."
   puts "  --help, --usage     Show this help"
   puts ""
-  puts "Implemented stages:"
+  puts "Config file keys (bootstrap-config.kv):"
+  puts "  SUBNET, NODE_COUNT, NODE_PREFIX, DEFAULT_USER, DEFAULT_PASS, NEW_PASS"
+  puts "  REGISTRY_NODE_IDX, REGISTRY_PORT, STATE_FILE"
+  puts "  FLASH_MODE, IMAGE_DEFAULT, IMAGE_1..IMAGE_4"
+  puts "  IMAGE_DEFAULT_TYPE, IMAGE_1_TYPE..IMAGE_4_TYPE  (manifest type per node, download mode)"
+  puts "  MANIFEST_FILE, IMAGE_CACHE_DIR"
+  puts "  BMC_FIRMWARE_MODE, BMC_MANIFEST_FILE"
+  puts "  SERVER_NODE_IDX, BMC_HOST"
+  puts ""
+  puts "Stages:"
   foreach s $STAGES { puts "  - $s" }
   puts ""
   puts "State file: bootstrap-state.kv (auto-saved after each stage)"
@@ -103,6 +145,22 @@ proc state_get {m key default} {
 proc state_put {mVar key val} {
   upvar $mVar m
   dict set m $key $val
+}
+
+# Apply a kv dict (from a config file) to the script's global config variables.
+# Called for each --config file before flag overrides are applied.
+proc apply_config {cfg} {
+  foreach key {SUBNET NODE_COUNT NODE_PREFIX DEFAULT_USER DEFAULT_PASS NEW_PASS
+               REGISTRY_NODE_IDX REGISTRY_PORT STATE_FILE FLASH_MODE IMAGE_DEFAULT
+               IMAGE_DEFAULT_TYPE MANIFEST_FILE IMAGE_CACHE_DIR
+               BMC_FIRMWARE_MODE BMC_MANIFEST_FILE
+               SERVER_NODE_IDX BMC_HOST} {
+    if {[dict exists $cfg $key]} { set ::$key [dict get $cfg $key] }
+  }
+  dict for {k v} $cfg {
+    if {[regexp {^IMAGE_(\d+)$}      $k -> idx]} { dict set ::IMAGE_PATHS      $idx $v }
+    if {[regexp {^IMAGE_(\d+)_TYPE$} $k -> idx]} { dict set ::IMAGE_NODE_TYPES $idx $v }
+  }
 }
 
 # SSH helpers
@@ -205,6 +263,118 @@ proc tpi_status {} {
   return $out
 }
 
+# Query BMC firmware version via tpi info.
+# Returns the version string (e.g. "2.3.2") or dies on failure.
+proc bmc_firmware_version {} {
+  set args [list tpi]
+  if {$::BMC_HOST ne ""} { lappend args --host $::BMC_HOST }
+  lappend args info
+  set rc [catch {exec {*}$args} out]
+  if {$rc} { die "Cannot query BMC info: $out" }
+  # Parse "version   : 2.3.2" from table output
+  if {[regexp { version\s*:\s*(\S+)} $out -> ver]} { return [string trim $ver] }
+  die "Could not parse BMC firmware version from tpi info output:\n$out"
+}
+
+# Return the image path to use for a given node index.
+# Per-node IMAGE_PATHS overrides IMAGE_DEFAULT.
+proc flash_image_for {node_idx} {
+  if {[dict exists $::IMAGE_PATHS $node_idx]} { return [dict get $::IMAGE_PATHS $node_idx] }
+  return $::IMAGE_DEFAULT
+}
+
+# Flash a single node via tpi CLI, streaming output to the terminal.
+# img_or_local: a file path (image mode) or the literal string "local"
+# Timeout is generous — uploading a full OS image over USB can take 10–20 minutes.
+proc tpi_flash_node {node_idx img_or_local} {
+  set cmd [list tpi]
+  if {$::BMC_HOST ne ""} { lappend cmd --host $::BMC_HOST }
+  lappend cmd flash -n $node_idx
+  if {$img_or_local eq "local"} {
+    lappend cmd --local
+  } else {
+    lappend cmd --image-path $img_or_local
+  }
+  say "  spawn: [join $cmd { }]"
+  set timeout 1800
+  spawn {*}$cmd
+  expect eof
+  lassign [wait] pid spawnid os_err exit_code
+  if {$exit_code != 0} { die "tpi flash node $node_idx failed (exit $exit_code)" }
+}
+
+# Return the manifest image type for a given node (download mode).
+proc image_type_for {node_idx} {
+  if {[dict exists $::IMAGE_NODE_TYPES $node_idx]} { return [dict get $::IMAGE_NODE_TYPES $node_idx] }
+  return $::IMAGE_DEFAULT_TYPE
+}
+
+# Parse images-manifest.kv into a nested dict: type → {url ... sha256 ... description ...}
+# Format: TYPE.url=..., TYPE.sha256=..., TYPE.description=...
+proc load_manifest {file} {
+  if {![file exists $file]} { die "Manifest file not found: $file\nCopy images-manifest.kv.example to $file and fill in URLs + SHA256 checksums." }
+  set raw [kv_load $file]
+  set manifest [dict create]
+  dict for {k v} $raw {
+    if {[regexp {^([^.]+)\.(.+)$} $k -> type field]} {
+      if {![dict exists $manifest $type]} { dict set manifest $type [dict create] }
+      dict set manifest $type $field $v
+    }
+  }
+  return $manifest
+}
+
+# Return the SHA256 hex digest of a local file using sha256sum.
+proc sha256_file {path} {
+  return [string trim [lindex [split [sh "sha256sum [list $path]"] " "] 0]]
+}
+
+# Ensure the image for $type is present in the cache and its SHA256 matches the manifest.
+# Downloads and verifies if missing or corrupted. Returns the local file path.
+proc ensure_image_cached {type manifest} {
+  if {![dict exists $manifest $type]} {
+    die "Unknown image type '$type'. Available in manifest: [join [dict keys $manifest] {, }]"
+  }
+  set entry [dict get $manifest $type]
+  foreach req {url sha256} {
+    if {![dict exists $entry $req]} { die "Manifest entry '$type' is missing the '$req' field" }
+  }
+  set url      [dict get $entry url]
+  set expected [string tolower [string trim [dict get $entry sha256]]]
+  set fname    [file tail $url]
+  set cache    [file join $::IMAGE_CACHE_DIR $fname]
+
+  if {[file exists $cache]} {
+    say "  Cache hit: $cache"
+    say "  Verifying SHA256…"
+    set actual [sha256_file $cache]
+    if {$actual eq $expected} {
+      say "  SHA256 OK"
+      return $cache
+    }
+    say "  SHA256 mismatch — re-downloading (cached: $actual, expected: $expected)"
+    file delete $cache
+  }
+
+  file mkdir $::IMAGE_CACHE_DIR
+  say "  Downloading: $url"
+  # curl -L follows redirects; --fail exits non-zero on HTTP errors
+  set rc [catch {exec curl -L --fail --progress-bar -o $cache $url 2>@stdout} out]
+  if {$rc} {
+    catch {file delete $cache}
+    die "Download failed for '$type': $out"
+  }
+
+  say "  Verifying SHA256…"
+  set actual [sha256_file $cache]
+  if {$actual ne $expected} {
+    file delete $cache
+    die "SHA256 mismatch after download for '$type' — file deleted.\n  got:      $actual\n  expected: $expected\nThis may indicate a corrupted download or a MitM attack. Do not proceed."
+  }
+  say "  SHA256 OK"
+  return $cache
+}
+
 # Discovery helpers
 proc find_bmc {subnet} {
   say "Scanning $subnet for BMC (hostname likely 'turingpi')"
@@ -232,6 +402,25 @@ proc discover_nodes {subnet} {
 }
 
 # ---------- Parse Arguments ----------
+# Pass 1: load config files (so flags in pass 2 can override them)
+set _config_files {}
+for {set i 0} {$i < $argc} {incr i} {
+  set a [lindex $argv $i]
+  if {$a eq "--help" || $a eq "--usage"} { print_help; exit 0 }
+  if {$a eq "--config"} { incr i; lappend _config_files [lindex $argv $i] }
+}
+# Auto-load ./bootstrap-config.kv when no --config was given
+if {[llength $_config_files] == 0 && [file exists "./bootstrap-config.kv"]} {
+  lappend _config_files "./bootstrap-config.kv"
+}
+foreach _cf $_config_files {
+  if {![file exists $_cf]} { die "Config file not found: $_cf" }
+  apply_config [kv_load $_cf]
+  say "Loaded config: $_cf"
+}
+unset _config_files
+
+# Pass 2: flag overrides (take precedence over config file values)
 set dryrun 0
 set fromStage ""
 set toStage ""
@@ -244,18 +433,28 @@ for {set i 0} {$i < $argc} {incr i} {
     "--from"       { incr i; set fromStage [lindex $argv $i] }
     "--to"         { incr i; set toStage   [lindex $argv $i] }
     "--phase"      { incr i; set phase     [lindex $argv $i] }
-    "--flash"      { incr i; set FLASH_MODE [lindex $argv $i] }
-    "--rediscover" { set rediscover 1 }
+    "--flash"      { incr i; set FLASH_MODE      [lindex $argv $i] }
+    "--image"      { incr i; set IMAGE_DEFAULT  [lindex $argv $i] }
+    "--image-1"    { incr i; dict set IMAGE_PATHS 1 [lindex $argv $i] }
+    "--image-2"    { incr i; dict set IMAGE_PATHS 2 [lindex $argv $i] }
+    "--image-3"    { incr i; dict set IMAGE_PATHS 3 [lindex $argv $i] }
+    "--image-4"    { incr i; dict set IMAGE_PATHS 4 [lindex $argv $i] }
+    "--manifest"      { incr i; set MANIFEST_FILE      [lindex $argv $i] }
+    "--cache-dir"     { incr i; set IMAGE_CACHE_DIR    [lindex $argv $i] }
+    "--bmc-firmware"  { incr i; set BMC_FIRMWARE_MODE  [lindex $argv $i] }
+    "--bmc-manifest"  { incr i; set BMC_MANIFEST_FILE  [lindex $argv $i] }
+    "--rediscover"    { set rediscover 1 }
+    "--config"     { incr i }
     "--help" -
-    "--usage" { print_help; exit 0 }
-    default { }
+    "--usage"      { }
+    default        { }
   }
 }
 
 # phase shortcuts
 if {$phase ne ""} {
   switch -- $phase {
-    "A" { set fromStage "A1_find_bmc"; set toStage "A7_ephemeral_registry_phaseA" }
+    "A" { set fromStage "A0_bmc_firmware"; set toStage "A7_ephemeral_registry_phaseA" }
     "B" { set fromStage "B1_persistent_storage"; set toStage "B8_verify_https_auth" }
     "C" { set fromStage "C1_local_registry_mirror"; set toStage "C3_sync_resilience" }
     default { }
@@ -275,6 +474,85 @@ if {$fromStage ne ""} { set i [stage_index $fromStage]; if {$i < 0} { die "Unkno
 if {$toStage ne ""}   { set j [stage_index $toStage];   if {$j < 0} { die "Unknown --to $toStage" }   ; set endIdx $j }
 
 # ---------- Stage Implementations ----------
+# ----- Stage  A0 -------
+proc stage_A0_bmc_firmware {dry stateRef} {
+  upvar $stateRef state
+  say "A0: BMC firmware mode: $::BMC_FIRMWARE_MODE"
+  if {$::BMC_FIRMWARE_MODE eq "skip"} { say "Skipping BMC firmware check (use --bmc-firmware check|upgrade to enable)"; return }
+
+  if {$dry} {
+    say "DRY: tpi info → check version against $::BMC_MANIFEST_FILE"
+    if {$::BMC_FIRMWARE_MODE eq "upgrade"} {
+      say "DRY: if outdated: download + verify SHA256 + tpi firmware --file <image>"
+    }
+    return
+  }
+
+  # Resolve BMC_HOST from state if not already set
+  if {$::BMC_HOST eq ""} {
+    set stored [state_get $state "bmc_ip" ""]
+    if {$stored ne ""} { set ::BMC_HOST $stored; say "  BMC host from state: $::BMC_HOST" } \
+    else { die "BMC_HOST not set and not in state. Run A1 first or set BMC_HOST in config." }
+  }
+
+  say "  Querying BMC firmware version…"
+  set current [bmc_firmware_version]
+  say "  Running: $current"
+
+  set manifest [load_manifest $::BMC_MANIFEST_FILE]
+  if {![dict exists $manifest "latest"]} {
+    die "BMC manifest '$::BMC_MANIFEST_FILE' must contain a 'latest' entry (latest.version, latest.url, latest.sha256)"
+  }
+  set entry [dict get $manifest "latest"]
+  if {![dict exists $entry "version"]} { die "BMC manifest 'latest' entry is missing 'version' field" }
+  set latest [dict get $entry "version"]
+  say "  Latest known: $latest"
+
+  if {$current eq $latest} {
+    say "  BMC firmware is up to date."
+    return
+  }
+
+  say "  BMC firmware outdated: $current → $latest"
+  if {$::BMC_FIRMWARE_MODE eq "check"} {
+    say "  WARNING: run with --bmc-firmware upgrade (or BMC_FIRMWARE_MODE=upgrade) to apply."
+    return
+  }
+
+  # upgrade: download, verify, flash
+  say "  Downloading BMC firmware $latest…"
+  set fw_path [ensure_image_cached "latest" $manifest]
+
+  say "  Flashing BMC firmware — the BMC will reboot (nodes will lose power briefly)…"
+  set cmd [list tpi]
+  if {$::BMC_HOST ne ""} { lappend cmd --host $::BMC_HOST }
+  lappend cmd firmware --file $fw_path
+  say "  spawn: [join $cmd { }]"
+  set timeout 300
+  spawn {*}$cmd
+  expect eof
+  lassign [wait] pid spawnid os_err exit_code
+  if {$exit_code != 0} { die "BMC firmware flash failed (exit $exit_code)" }
+
+  # Wait for BMC to go down then come back up
+  say "  Waiting for BMC to reboot (up to 120 s)…"
+  set deadline [expr {[clock seconds] + 120}]
+  after 5000
+  while {[clock seconds] < $deadline} {
+    set rc [catch {exec tpi --host $::BMC_HOST info 2>/dev/null} out]
+    if {!$rc} { break }
+    after 3000
+  }
+
+  set new_ver [bmc_firmware_version]
+  if {$new_ver eq $latest} {
+    say "  BMC upgraded: $current → $new_ver"
+    state_put state "bmc_firmware" $new_ver
+  } else {
+    say "  WARNING: version after upgrade is '$new_ver' (expected '$latest') — check manually"
+  }
+}
+
 # ----- Stage  A1 -------
 proc stage_A1_find_bmc {dry stateRef} {
   upvar $stateRef state
@@ -312,8 +590,93 @@ proc stage_A2_poweroff_all {dry stateRef} {
 # ----- Stage  A3 -------
 proc stage_A3_flash_optional {dry stateRef} {
   say "A3: Flash mode: $::FLASH_MODE"
-  if {$::FLASH_MODE eq "skip"} { say "Skipping flash"; return }
-  if {$dry} { say "DRY: would flash nodes via $::FLASH_MODE"; return }
+
+  switch -- $::FLASH_MODE {
+
+    "skip" {
+      say "Skipping flash (use --flash image|download|local to enable)"
+    }
+
+    "local" {
+      if {$dry} {
+        for {set i 1} {$i <= $::NODE_COUNT} {incr i} { say "DRY: tpi flash -n $i --local" }
+        return
+      }
+      say "Flashing $::NODE_COUNT nodes from BMC-local image…"
+      for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+        say "  Node $i of $::NODE_COUNT…"
+        tpi_flash_node $i "local"
+        say "  Node $i: done."
+      }
+      say "A3: All nodes flashed."
+    }
+
+    "image" {
+      # Validate all paths up front — fail before touching any hardware
+      for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+        set img [flash_image_for $i]
+        if {$img eq ""} { die "No image for node $i. Set IMAGE_DEFAULT in config or --image PATH (--image-$i for per-node override)" }
+        if {!$dry && ![file exists $img]} { die "Image for node $i not found: $img" }
+      }
+      if {$dry} {
+        for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+          say "DRY: tpi flash -n $i --image-path [flash_image_for $i]"
+        }
+        return
+      }
+      say "Flashing $::NODE_COUNT nodes (this may take several minutes per node)…"
+      for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+        say "  Node $i of $::NODE_COUNT…"
+        tpi_flash_node $i [flash_image_for $i]
+        say "  Node $i: done."
+      }
+      say "A3: All nodes flashed."
+    }
+
+    "download" {
+      set manifest [load_manifest $::MANIFEST_FILE]
+      if {$dry} {
+        for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+          set type [image_type_for $i]
+          if {![dict exists $manifest $type]} {
+            die "Unknown image type '$type' for node $i. Available: [join [dict keys $manifest] {, }]"
+          }
+          set url   [dict get $manifest $type url]
+          set fname [file tail $url]
+          set cache [file join $::IMAGE_CACHE_DIR $fname]
+          if {[file exists $cache]} {
+            say "DRY: node $i (type=$type): cache hit $cache — would verify SHA256 then flash"
+          } else {
+            say "DRY: node $i (type=$type): would download $url → $cache, verify SHA256, then flash"
+          }
+        }
+        return
+      }
+      # Download and verify all distinct types first, then flash
+      say "Downloading and verifying images…"
+      set type_to_path [dict create]
+      for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+        set type [image_type_for $i]
+        if {![dict exists $type_to_path $type]} {
+          say "  Fetching type '$type'…"
+          dict set type_to_path $type [ensure_image_cached $type $manifest]
+        }
+      }
+      say "Flashing $::NODE_COUNT nodes (this may take several minutes per node)…"
+      for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+        set type [image_type_for $i]
+        set path [dict get $type_to_path $type]
+        say "  Node $i of $::NODE_COUNT (type=$type)…"
+        tpi_flash_node $i $path
+        say "  Node $i: done."
+      }
+      say "A3: All nodes flashed."
+    }
+
+    default {
+      die "Unknown FLASH_MODE '$::FLASH_MODE'. Valid: skip, image, download, local"
+    }
+  }
 }
 
 # ----- Stage  A4 -------
@@ -581,14 +944,11 @@ if {$rediscover} {
   exit 0
 }
 
-set startIdx 0
-set endIdx [expr {[llength $STAGES]-1}]
-# (already set via --from/--to parsing above)
-
 for {set idx $startIdx} {$idx <= $endIdx} {incr idx} {
   set s [lindex $STAGES $idx]
   say "Stage $s"
   switch -- $s {
+    "A0_bmc_firmware"             { stage_A0_bmc_firmware            $dryrun state }
     "A1_find_bmc"                 { stage_A1_find_bmc                $dryrun state }
     "A2_poweroff_all"             { stage_A2_poweroff_all            $dryrun state }
     "A3_flash_optional"           { stage_A3_flash_optional          $dryrun state }

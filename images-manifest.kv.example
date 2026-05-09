@@ -1,0 +1,31 @@
+# images-manifest.kv — copy to images-manifest.kv and fill in real URLs + SHA256 checksums.
+# Used by --flash download mode to fetch and verify OS images before flashing.
+#
+# Format: TYPE.field=value
+#   TYPE       - a name you choose; referenced by IMAGE_DEFAULT_TYPE or IMAGE_N_TYPE in config
+#   url        - direct download URL for the image file (http or https; redirects followed)
+#   sha256     - SHA256 checksum of the downloaded file (hex, lowercase or uppercase)
+#   description- human-readable label (optional, shown in dry-run output)
+#
+# Where to find official TuringPi RK1 images and checksums:
+#   https://docs.turingpi.com/docs/turing-rk1-flashing-os
+#   https://github.com/turing-machines/RK1-firmware/releases
+#
+# Example with placeholder values — replace url and sha256 before use:
+
+# ---------- default (Ubuntu 22.04 for RK1) ----------
+default.description=Ubuntu 22.04 Server ARM64 for TuringPi RK1
+default.url=https://firmware.turingpi.com/turing-rk1/ubuntu_22.04_rockchip_linux/v2.0.5/ubuntu-22.04-preinstalled-server-arm64+rk1.img.xz
+default.sha256=REPLACE_WITH_ACTUAL_SHA256_FROM_OFFICIAL_RELEASE_PAGE
+
+# ---------- Example: separate server / worker images ----------
+# If you want node 1 to boot a different image (e.g., a pre-seeded k3s server image),
+# define it here and set IMAGE_1_TYPE=server in bootstrap-config.kv.
+#
+# server.description=Ubuntu 22.04 Server ARM64 for RK1 (pre-seeded k3s server)
+# server.url=https://...
+# server.sha256=...
+#
+# worker.description=Ubuntu 22.04 Server ARM64 for RK1 (standard worker)
+# worker.url=https://...
+# worker.sha256=...

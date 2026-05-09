@@ -1,0 +1,42 @@
+# bootstrap-config.kv — copy to bootstrap-config.kv and edit for your setup.
+# Auto-loaded by bootstrap-turingpi-cluster.exp if no --config flag is given.
+# Command-line flags always override values set here.
+
+# ---------- Network ----------
+SUBNET=192.168.1.0/24
+
+# ---------- Nodes ----------
+NODE_COUNT=4
+NODE_PREFIX=rk1-node
+# Which node runs k3s server (Phase B reference only; does not affect flashing)
+SERVER_NODE_IDX=1
+
+# ---------- Credentials ----------
+DEFAULT_USER=ubuntu
+DEFAULT_PASS=ubuntu
+# NEW_PASS=  (leave blank to be prompted at runtime)
+
+# ---------- Registry ----------
+REGISTRY_NODE_IDX=1
+REGISTRY_PORT=5000
+
+# ---------- State ----------
+STATE_FILE=./bootstrap-state.kv
+
+# ---------- Flash ----------
+# FLASH_MODE=skip         # skip flashing (default)
+# FLASH_MODE=image        # upload image files from this laptop via tpi flash --image-path
+# FLASH_MODE=local        # use image already on BMC SD card via tpi flash --local
+
+# Default image for all nodes (required when FLASH_MODE=image):
+# IMAGE_DEFAULT=/path/to/ubuntu-rk1.img
+
+# Per-node image overrides (override IMAGE_DEFAULT for that node only):
+# IMAGE_1=/path/to/server.img
+# IMAGE_2=/path/to/worker.img
+# IMAGE_3=/path/to/worker.img
+# IMAGE_4=/path/to/worker.img
+
+# ---------- BMC ----------
+# BMC_HOST=  (leave blank to auto-discover via nmap in A1)
+# BMC_HOST=192.168.1.163

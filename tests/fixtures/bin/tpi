@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Stub tpi binary for CI mock tests.
+# Simulates enough of the tpi CLI surface to let download+verify tests run
+# without a real BMC — dies at flash/firmware as expected.
+case "$*" in
+  *flash*)    echo "MOCK-TPI: flash called (no BMC in CI)"; exit 1 ;;
+  *firmware*) echo "MOCK-TPI: firmware called (no BMC in CI)"; exit 1 ;;
+  *info*)     echo " version   : 2.3.2"; echo " build_version: 2024.05.1"; exit 0 ;;
+  *power*)    echo "MOCK-TPI: ok"; exit 0 ;;
+  *)          echo "MOCK-TPI: unknown command $*"; exit 1 ;;
+esac

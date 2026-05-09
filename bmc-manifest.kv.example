@@ -1,0 +1,18 @@
+# bmc-manifest.kv — copy to bmc-manifest.kv and fill in real URL + SHA256.
+# Used by A0 (BMC firmware check/upgrade stage) to detect and apply BMC updates.
+#
+# Where to find official TuringPi 2 BMC firmware releases + checksums:
+#   https://github.com/turing-machines/BMC-Firmware/releases
+#
+# Format mirrors images-manifest.kv: TYPE.field=value
+# The 'latest' entry is the one A0 compares against the running version.
+#
+# Current board state (as of 2026-05-09):
+#   Running version : 2.3.2 (build 2024.05.1, 2024-09-03)
+#   Latest on GitHub: 2.1.0 (2024-02-05) — board is ahead; no upgrade available
+#   When a newer public release appears, update latest.version + latest.url + latest.sha256
+
+latest.version=2.3.2
+latest.description=TuringPi 2 BMC firmware 2.3.2 (2024-09-03)
+latest.url=REPLACE_WITH_DOWNLOAD_URL_WHEN_FOUND
+latest.sha256=REPLACE_WITH_SHA256_FROM_RELEASE_PAGE
