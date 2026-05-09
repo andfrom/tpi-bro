@@ -63,11 +63,14 @@ else
   fail "tpi CLI not found"; exit 1
 fi
 
+BMC_HOST_CFG=$(grep -s '^BMC_HOST=' bootstrap-config.kv ~/.turingpi/bootstrap-config.kv 2>/dev/null | head -1 | cut -d= -f2)
 if ping -c 1 -W 2 turingpi.local &>/dev/null 2>&1 || \
    grep -q turingpi.local /etc/hosts; then
-  ok "BMC reachable"
+  ok "BMC reachable (turingpi.local)"
+elif [[ -n "$BMC_HOST_CFG" ]] && ping -c 1 -W 2 "$BMC_HOST_CFG" &>/dev/null 2>&1; then
+  ok "BMC reachable ($BMC_HOST_CFG from config)"
 else
-  fail "BMC not reachable (check /etc/hosts or mDNS)"
+  fail "BMC not reachable (tried turingpi.local and BMC_HOST_CFG=${BMC_HOST_CFG:-unset})"
   exit 1
 fi
 

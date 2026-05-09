@@ -23,6 +23,7 @@ set REGISTRY_NODE_IDX 1
 set REGISTRY_PORT 5000
 # Use a simple key=value state file
 set STATE_FILE "./bootstrap-state.kv"
+set _default_state_file $STATE_FILE
 set FLASH_MODE "skip"           ;# image|download|local|skip
 set IMAGE_DEFAULT ""            ;# image path for all nodes (image mode); overridden per-node via IMAGE_N
 set IMAGE_PATHS [dict create]   ;# node index → image path overrides (set via --image-N or config IMAGE_N)
@@ -900,6 +901,10 @@ proc do_rediscover {dry stateRef} {
   # ---- Re-discover BMC ----
   say "  Scanning for BMC…"
   set bmc [find_bmc $::SUBNET]
+  if {$bmc eq "" && $::BMC_HOST ne ""} {
+    say "  BMC not found via nmap hostname — using BMC_HOST from config: $::BMC_HOST"
+    set bmc $::BMC_HOST
+  }
   if {$bmc ne ""} {
     set old_bmc [state_get $state "bmc_ip" ""]
     if {$old_bmc ne $bmc} { say "  BMC: $old_bmc → $bmc (updated)" } else { say "  BMC: $bmc (unchanged)" }
@@ -976,7 +981,11 @@ if {$argc == 0} {
 }
 
 say "Starting bootstrap (dry-run=$dryrun, from=$fromStage, to=$toStage, phase=$phase, flash=$FLASH_MODE)…"
-set state [kv_load $STATE_FILE]
+if {[info exists ::env(BOOTSTRAP_NO_AUTO_STATE)] && $STATE_FILE eq $_default_state_file} {
+  set state [dict create]
+} else {
+  set state [kv_load $STATE_FILE]
+}
 # Restore BMC_HOST from a previous run so tpi commands work even if A1 is skipped
 if {$BMC_HOST eq "" && [dict exists $state "bmc_ip"]} {
   set BMC_HOST [dict get $state "bmc_ip"]
