@@ -218,6 +218,7 @@ for {set i 0} {$i < $argc} {incr i} {
     "--password"      { incr i; set CURRENT_PASS [lindex $argv $i] }
     "--remove-docker" { set REMOVE_DOCKER 1 }
     "--keep-hostname" { set KEEP_HOSTNAME 1 }
+    "--state-file"    { incr i; set STATE_FILE [lindex $argv $i] }
     "--help" -
     "--usage"         { print_help; exit 0 }
     default           { }

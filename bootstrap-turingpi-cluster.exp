@@ -49,7 +49,7 @@ set STAGES {
 
 # ---------- utils ----------
 proc say {msg} { puts "\n==> $msg" }
-proc sh {cmd} { set f [open "|$cmd 2>@1" r]; set out [read $f]; close $f; return $out }
+proc sh {cmd} { set f [open "|$cmd 2>@1" r]; set out [read $f]; catch {close $f}; return $out }
 proc ask_secret {prompt} { stty -echo; send_user $prompt; expect_user -re "(.*)\n"; stty echo; send_user "\n"; return $expect_out(1,string) }
 proc die {msg} { puts stderr "ERROR: $msg"; exit 1 }
 
@@ -575,8 +575,9 @@ proc stage_A0_bmc_firmware {dry stateRef} {
 # ----- Stage  A1 -------
 proc stage_A1_find_bmc {dry stateRef} {
   upvar $stateRef state
-  if {[check_bmc_known $state]} {
-    set ::BMC_HOST [state_get $state "bmc_ip" ""]
+  if {$::BMC_HOST ne "" || [check_bmc_known $state]} {
+    if {$::BMC_HOST eq ""} { set ::BMC_HOST [state_get $state "bmc_ip" ""] }
+    state_put state "bmc_ip" $::BMC_HOST
     say "A1: BMC already known at $::BMC_HOST"
     return
   }

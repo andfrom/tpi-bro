@@ -181,7 +181,8 @@ if [[ "$SUITE" == "all" || "$SUITE" == "1" ]]; then
 
   run_test "D16 teardown dry-run (no state file)" \
     0 "No state file" "" \
-    $TEARDOWN --dry-run --from T1_load_state --to T1_load_state
+    $TEARDOWN --dry-run --from T1_load_state --to T1_load_state \
+      --state-file "$TMP/nonexistent-state.kv"
 
   run_test "D17 teardown --keep-hostname --remove-docker" \
     0 "keep-hostname" "T5: Reset hostnames" \
