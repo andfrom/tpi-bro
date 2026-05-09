@@ -51,7 +51,18 @@ set STAGES {
 # ---------- utils ----------
 proc say {msg} { puts "\n==> $msg" }
 proc sh {cmd} { set f [open [list | bash -c $cmd 2>@1] r]; set out [read $f]; catch {close $f}; return $out }
-proc ask_secret {prompt} { stty -echo; send_user $prompt; expect_user -re "(.*)\n"; stty echo; send_user "\n"; return $expect_out(1,string) }
+proc ask_secret {prompt} {
+  catch {stty -echo}
+  send_user $prompt
+  set val ""
+  expect_user {
+    -timeout -1
+    -re "(.*)\n" { catch { set val [string trimright $expect_out(1,string) "\r"] } }
+  }
+  catch {stty echo}
+  send_user "\n"
+  return $val
+}
 proc die {msg} { puts stderr "ERROR: $msg"; exit 1 }
 
 proc print_help {} {
@@ -210,6 +221,7 @@ proc ssh_shell {ip user pass commands} {
     -re "(P|p)assword:" { send "$pass\r"; exp_continue }
     -re "Are you sure.*" { send "yes\r"; exp_continue }
     -re "\\$ " { }
+    eof     { return 1 }
     timeout { return 1 }
   }
   foreach c $commands {
@@ -217,6 +229,7 @@ proc ssh_shell {ip user pass commands} {
     expect {
       -re "(?i)\\[sudo\\] password for $user:" { send -- "$pass\r"; exp_continue }
       -re "\\$ " { }
+      eof     { return 1 }
       timeout { return 1 }
     }
   }
@@ -833,7 +846,10 @@ proc stage_A5_name_password_reboot {dry stateRef} {
       "echo '127.0.1.1 $name' | sudo tee -a /etc/hosts >/dev/null" \
       "sudo reboot" \
     ]
-    ssh_shell $ip $::DEFAULT_USER $::DEFAULT_PASS $cmds
+    set rc [ssh_shell $ip $::DEFAULT_USER $::DEFAULT_PASS $cmds]
+    if {$rc != 0} {
+      die "Could not SSH to $name ($ip) as $::DEFAULT_USER with DEFAULT_PASS.\nNodes must start at factory defaults (DEFAULT_PASS='$::DEFAULT_PASS').\nIf nodes have a non-default password, set DEFAULT_PASS=<current> in bootstrap-config.kv or run teardown first."
+    }
     say "  waiting for $name to return…"
     after 10000
     set deadline [expr {[clock seconds] + 120}]
