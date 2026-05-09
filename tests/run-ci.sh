@@ -200,6 +200,11 @@ if [[ "$SUITE" == "all" || "$SUITE" == "1" ]]; then
   run_test "D20 A0 upgrade dry-run" \
     0 "download + verify SHA256" "" \
     $BOOTSTRAP --dry-run --from A0_bmc_firmware --to A0_bmc_firmware --bmc-firmware upgrade
+
+  run_test "D21 A3 bmc dry-run" \
+    0 "tpi flash -n 1 --local --image-path" "" \
+    $BOOTSTRAP --dry-run --from A3_flash_optional --to A3_flash_optional \
+      --flash bmc --manifest images-manifest.kv.example
 fi
 
 # ── Suite 2 — Mock / fault injection ─────────────────────────────────────────

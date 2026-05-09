@@ -24,7 +24,7 @@ set REGISTRY_PORT 5000
 # Use a simple key=value state file
 set STATE_FILE "./bootstrap-state.kv"
 set _default_state_file $STATE_FILE
-set FLASH_MODE "skip"           ;# image|download|local|skip
+set FLASH_MODE "skip"           ;# image|download|local|bmc|skip
 set IMAGE_DEFAULT ""            ;# image path for all nodes (image mode); overridden per-node via IMAGE_N
 set IMAGE_PATHS [dict create]   ;# node index → image path overrides (set via --image-N or config IMAGE_N)
 set IMAGE_DEFAULT_TYPE "default" ;# manifest image type for all nodes (download mode)
@@ -35,6 +35,10 @@ set SERVER_NODE_IDX 1           ;# which node runs k3s server (Phase B reference
 set BMC_FIRMWARE_MODE "skip"    ;# skip|check|upgrade  (A0 stage)
 set BMC_MANIFEST_FILE "./bmc-manifest.kv"  ;# version + download URL for BMC firmware
 set BMC_HOST ""                 ;# set by A1 from nmap; passed as --host to tpi
+set BMC_USER "root"             ;# SSH user on BMC (for --flash bmc)
+set BMC_PASS ""                 ;# SSH password on BMC; leave blank for key/passwordless auth
+set BMC_IMAGE_DIR "/mnt/sdcard/tpi-images"  ;# directory on BMC to store downloaded images
+set BMC_SDCARD_DEV ""                        ;# SD card partition on BMC; blank = auto-detect largest ext2/3/4 mmcblk partition
 
 # ---------- Stage Registry ----------
 set STAGES {
@@ -82,10 +86,12 @@ proc print_help {} {
   puts "  --phase A|B|C       Shortcut to a stage range (Phase A implemented here)"
   puts "  --from STAGE        Start at a specific stage"
   puts "  --to STAGE          Stop after a specific stage"
-  puts "  --flash image|download|local|skip"
+  puts "  --flash image|download|local|bmc|skip"
   puts "                      image:    upload a local image file via tpi flash --image-path"
   puts "                      download: fetch image(s) from manifest, verify SHA256, then flash"
   puts "                      local:    use image already on BMC SD card (tpi flash --local)"
+  puts "                      bmc:      SSH to BMC, curl image to SD card there, then flash"
+  puts "                                (avoids uploading from laptop; SD card must be present)"
   puts "                      skip:     skip flashing entirely (default)"
   puts "  --image PATH        Default OS image file for all nodes (--flash image)"
   puts "  --image-N PATH      Per-node image override for node N (1-4); overrides --image."
@@ -108,6 +114,7 @@ proc print_help {} {
   puts "  MANIFEST_FILE, IMAGE_CACHE_DIR"
   puts "  BMC_FIRMWARE_MODE, BMC_MANIFEST_FILE"
   puts "  SERVER_NODE_IDX, BMC_HOST"
+  puts "  BMC_USER, BMC_PASS, BMC_IMAGE_DIR, BMC_SDCARD_DEV  (bmc flash mode)"
   puts ""
   puts "Stages:"
   foreach s $STAGES { puts "  - $s" }
@@ -166,7 +173,8 @@ proc apply_config {cfg} {
                REGISTRY_NODE_IDX REGISTRY_PORT STATE_FILE FLASH_MODE IMAGE_DEFAULT
                IMAGE_DEFAULT_TYPE MANIFEST_FILE IMAGE_CACHE_DIR
                BMC_FIRMWARE_MODE BMC_MANIFEST_FILE
-               SERVER_NODE_IDX BMC_HOST} {
+               SERVER_NODE_IDX BMC_HOST
+               BMC_USER BMC_PASS BMC_IMAGE_DIR BMC_SDCARD_DEV} {
     if {[dict exists $cfg $key]} { set ::$key [dict get $cfg $key] }
   }
   dict for {k v} $cfg {
@@ -329,6 +337,67 @@ proc tpi_flash_node {node_idx img_or_local} {
   # tpi 1.0.x exits 0 even on flash errors — check output as a fallback
   if {$exit_code != 0 || [string match "*Error occured*" $output]} {
     die "tpi flash node $node_idx failed: [string trim $output]"
+  }
+}
+
+# Run a short command on the BMC via SSH. Returns {exit_code output}.
+proc bmc_cmd {cmd} {
+  set bmc $::BMC_HOST
+  if {$bmc eq ""} { die "BMC host not known. Run A1 first or set BMC_HOST in config." }
+  set output ""
+  spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 -o BatchMode=no $::BMC_USER@$bmc $cmd
+  set timeout 30
+  expect {
+    -re "(P|p)assword:" {
+      if {$::BMC_PASS ne ""} { send "$::BMC_PASS\r"; exp_continue } \
+      else { send "\r"; exp_continue }
+    }
+    -re {[^\r\n]*\r?\n} { append output $expect_out(0,string); exp_continue }
+    timeout {}
+    eof {}
+  }
+  lassign [wait] pid spawnid os_err exit_code
+  return [list $exit_code [string trim $output]]
+}
+
+# Run a long-running command on the BMC (e.g. curl download), streaming output to terminal.
+# Returns the exit code. timeout_s should be generous (3600 for large image downloads).
+proc bmc_stream {cmd timeout_s} {
+  set bmc $::BMC_HOST
+  if {$bmc eq ""} { die "BMC host not known. Run A1 first or set BMC_HOST in config." }
+  spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 -o BatchMode=no $::BMC_USER@$bmc $cmd
+  set timeout $timeout_s
+  expect {
+    -re "(P|p)assword:" {
+      if {$::BMC_PASS ne ""} { send "$::BMC_PASS\r"; exp_continue } \
+      else { send "\r"; exp_continue }
+    }
+    -re {.+} { puts -nonewline $expect_out(0,string); flush stdout; exp_continue }
+    timeout { die "BMC command timed out after ${timeout_s}s: $cmd" }
+    eof {}
+  }
+  lassign [wait] pid spawnid os_err exit_code
+  return $exit_code
+}
+
+# Flash a single node via tpi using an image path on the BMC's own filesystem.
+proc tpi_flash_node_bmc {node_idx bmc_path} {
+  set cmd [list tpi]
+  if {$::BMC_HOST ne ""} { lappend cmd --host $::BMC_HOST }
+  lappend cmd flash -n $node_idx --local --image-path $bmc_path
+  say "  spawn: [join $cmd { }]"
+  set timeout 1800
+  set output ""
+  spawn {*}$cmd
+  expect {
+    -re "Error occured.*" { append output $expect_out(0,string); exp_continue }
+    eof {}
+  }
+  lassign [wait] pid spawnid os_err exit_code
+  if {$exit_code != 0 || [string match "*Error occured*" $output]} {
+    die "tpi flash node $node_idx (bmc) failed: [string trim $output]"
   }
 }
 
@@ -734,8 +803,126 @@ proc stage_A3_flash_optional {dry stateRef} {
       say "A3: All nodes flashed."
     }
 
+    "bmc" {
+      # Download images directly on BMC via curl (HTTPS), cache on SD card, flash with --local.
+      # Avoids uploading large files from the laptop over the network.
+      set manifest [load_manifest $::MANIFEST_FILE]
+      if {$dry} {
+        set bmc_disp [expr {$::BMC_HOST ne "" ? $::BMC_HOST : "<bmc-host>"}]
+        set sdcard_mount [file dirname $::BMC_IMAGE_DIR]
+        if {$::BMC_SDCARD_DEV ne ""} {
+          say "DRY: SSH $::BMC_USER@$bmc_disp: ensure $::BMC_SDCARD_DEV mounted at $sdcard_mount"
+        } else {
+          say "DRY: SSH $::BMC_USER@$bmc_disp: check $sdcard_mount; if not mounted, auto-detect largest ext2/3/4 mmcblk partition and mount"
+        }
+        say "DRY: SSH $::BMC_USER@$bmc_disp: mkdir -p $::BMC_IMAGE_DIR"
+        for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+          set type [image_type_for $i]
+          if {![dict exists $manifest $type]} {
+            die "Unknown image type '$type' for node $i. Available: [join [dict keys $manifest] {, }]"
+          }
+          set url   [dict get $manifest $type url]
+          set fname [file tail $url]
+          set dest  "$::BMC_IMAGE_DIR/$fname"
+          say "DRY: node $i (type=$type): BMC curl/cache → $dest, SHA256 verify, tpi flash -n $i --local --image-path $dest"
+        }
+        return
+      }
+
+      if {$::BMC_HOST eq ""} { die "BMC host not known. Run A1 first." }
+
+      # Ensure SD card is mounted at the parent of BMC_IMAGE_DIR
+      set sdcard_mount [file dirname $::BMC_IMAGE_DIR]
+      say "  Checking BMC SD card mount at $sdcard_mount…"
+      lassign [bmc_cmd "mountpoint -q $sdcard_mount 2>/dev/null && echo yes || echo no"] _rc mnt_out
+      if {![string match "*yes*" $mnt_out]} {
+        set dev $::BMC_SDCARD_DEV
+        if {$dev eq ""} {
+          say "  Not mounted — auto-detecting SD card partition on BMC…"
+          # Find the largest unmounted ext2/3/4 partition on any mmcblk device.
+          # Sort by block count (descending) so a multi-partition RPi card picks its largest partition.
+          set detect {for p in /dev/mmcblk*p*; do [ -b "$p" ] || continue; grep -q "^$p " /proc/mounts && continue; fs=$(blkid -s TYPE -o value "$p" 2>/dev/null); case "$fs" in ext2|ext3|ext4) :;; *) continue;; esac; n=${p##*/}; sz=$(cat /sys/class/block/$n/size 2>/dev/null || echo 0); echo "$sz $p"; done | sort -rn | head -1 | awk '{print $2}'}
+          lassign [bmc_cmd $detect] _rc2 dev
+          set dev [string trim $dev]
+          if {$dev eq ""} {
+            die "No SD card found on BMC (no unmounted ext2/3/4 mmcblk partition).\nInsert an SD card with an ext2/3/4 partition, or set BMC_SDCARD_DEV in bootstrap-config.kv."
+          }
+          say "  Auto-detected: $dev"
+        }
+        say "  Mounting $dev at $sdcard_mount…"
+        lassign [bmc_cmd "mkdir -p $sdcard_mount && mount $dev $sdcard_mount && echo ok || echo fail"] _rc3 mnt2_out
+        if {![string match "*ok*" $mnt2_out]} {
+          die "Failed to mount $dev at $sdcard_mount: $mnt2_out\nCheck BMC_SDCARD_DEV or the SD card filesystem."
+        }
+      }
+      lassign [bmc_cmd "mkdir -p $::BMC_IMAGE_DIR && echo ok || echo fail"] _rc4 mkdir_out
+      if {![string match "*ok*" $mkdir_out]} {
+        die "Failed to create image directory $::BMC_IMAGE_DIR on BMC: $mkdir_out"
+      }
+
+      # Download each distinct image type (curl on BMC, with local cache check + SHA256 verify)
+      set type_to_path [dict create]
+      for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+        set type [image_type_for $i]
+        if {[dict exists $type_to_path $type]} continue
+        if {![dict exists $manifest $type]} {
+          die "Unknown image type '$type' for node $i. Available: [join [dict keys $manifest] {, }]"
+        }
+        set entry    [dict get $manifest $type]
+        set url      [dict get $entry url]
+        set expected [string tolower [string trim [dict get $entry sha256]]]
+        set fname    [file tail $url]
+        set dest     "$::BMC_IMAGE_DIR/$fname"
+
+        # Check if already cached on BMC with correct SHA256
+        lassign [bmc_cmd "test -f [list $dest] && echo exists || echo missing"] _rc4 exists_out
+        if {[string match "*exists*" $exists_out]} {
+          say "  BMC cache hit: $dest — verifying SHA256…"
+          lassign [bmc_cmd "sha256sum [list $dest]"] _rc5 sum_out
+          set actual [string tolower [string trim [lindex [split $sum_out " "] 0]]]
+          if {$actual eq $expected} {
+            say "  SHA256 OK"
+            dict set type_to_path $type $dest
+            continue
+          }
+          say "  SHA256 mismatch — re-downloading (cached: $actual, expected: $expected)"
+          bmc_cmd "rm -f [list $dest]"
+        }
+
+        say "  BMC downloading (type=$type): $url"
+        say "  (downloading on BMC — may take several minutes for large images)"
+        # curl -fL: follow redirects, fail on HTTP errors; redirect progress to stdout for visibility
+        set dl_rc [bmc_stream "curl -fL --progress-bar -o [list $dest] [list $url] 2>&1" 3600]
+        if {$dl_rc != 0} {
+          bmc_cmd "rm -f [list $dest]"
+          die "BMC download failed for type '$type' (exit $dl_rc)"
+        }
+
+        say "  Verifying SHA256 on BMC…"
+        lassign [bmc_cmd "sha256sum [list $dest]"] _rc6 sum_out2
+        set actual [string tolower [string trim [lindex [split $sum_out2 " "] 0]]]
+        if {$actual ne $expected} {
+          bmc_cmd "rm -f [list $dest]"
+          die "SHA256 mismatch after BMC download for type '$type' — file deleted.\n  got:      $actual\n  expected: $expected\nThis may indicate a corrupted download. Do not proceed."
+        }
+        say "  SHA256 OK"
+        dict set type_to_path $type $dest
+      }
+
+      # Flash each node using the BMC-local image path
+      say "Flashing $::NODE_COUNT nodes from BMC SD card…"
+      for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+        set type [image_type_for $i]
+        set path [dict get $type_to_path $type]
+        say "  Node $i of $::NODE_COUNT (type=$type)…"
+        tpi_flash_node_bmc $i $path
+        say "  Node $i: done."
+      }
+      say "A3: All nodes flashed via BMC."
+    }
+
     default {
-      die "Unknown FLASH_MODE '$::FLASH_MODE'. Valid: skip, image, download, local"
+      die "Unknown FLASH_MODE '$::FLASH_MODE'. Valid: skip, image, download, local, bmc"
     }
   }
 }
