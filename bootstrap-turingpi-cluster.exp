@@ -37,6 +37,8 @@ set BMC_MANIFEST_FILE "./bmc-manifest.kv"  ;# version + download URL for BMC fir
 set BMC_HOST ""                 ;# set by A1 from nmap; passed as --host to tpi
 set BMC_USER "root"             ;# SSH user on BMC (for --flash bmc)
 set BMC_PASS ""                 ;# SSH password on BMC; leave blank for key/passwordless auth
+set BMC_WEB_USER "admin"        ;# tpi CLI web UI username (for tpi flash)
+set BMC_WEB_PASS ""             ;# tpi CLI web UI password
 set BMC_IMAGE_DIR "/mnt/sdcard/tpi-images"  ;# directory on BMC to store downloaded images
 set BMC_SDCARD_DEV ""                        ;# SD card partition on BMC; blank = auto-detect largest ext2/3/4 mmcblk partition
 
@@ -114,7 +116,8 @@ proc print_help {} {
   puts "  MANIFEST_FILE, IMAGE_CACHE_DIR"
   puts "  BMC_FIRMWARE_MODE, BMC_MANIFEST_FILE"
   puts "  SERVER_NODE_IDX, BMC_HOST"
-  puts "  BMC_USER, BMC_PASS, BMC_IMAGE_DIR, BMC_SDCARD_DEV  (bmc flash mode)"
+  puts "  BMC_USER, BMC_PASS, BMC_IMAGE_DIR, BMC_SDCARD_DEV  (bmc flash mode — SSH)"
+  puts "  BMC_WEB_USER, BMC_WEB_PASS  (tpi flash web UI credentials)"
   puts ""
   puts "Stages:"
   foreach s $STAGES { puts "  - $s" }
@@ -174,7 +177,8 @@ proc apply_config {cfg} {
                IMAGE_DEFAULT_TYPE MANIFEST_FILE IMAGE_CACHE_DIR
                BMC_FIRMWARE_MODE BMC_MANIFEST_FILE
                SERVER_NODE_IDX BMC_HOST
-               BMC_USER BMC_PASS BMC_IMAGE_DIR BMC_SDCARD_DEV} {
+               BMC_USER BMC_PASS BMC_IMAGE_DIR BMC_SDCARD_DEV
+               BMC_WEB_USER BMC_WEB_PASS} {
     if {[dict exists $cfg $key]} { set ::$key [dict get $cfg $key] }
   }
   dict for {k v} $cfg {
@@ -330,7 +334,9 @@ proc tpi_flash_node {node_idx img_or_local} {
   set output ""
   spawn {*}$cmd
   expect {
-    -re "Error occured.*" { append output $expect_out(0,string); exp_continue }
+    -re {[Uu]ser:\s*$}     { send "$::BMC_WEB_USER\r"; exp_continue }
+    -re {[Pp]assword:\s*$} { send "$::BMC_WEB_PASS\r"; exp_continue }
+    -re "Error occured.*"  { append output $expect_out(0,string); exp_continue }
     eof {}
   }
   lassign [wait] pid spawnid os_err exit_code
@@ -392,7 +398,9 @@ proc tpi_flash_node_bmc {node_idx bmc_path} {
   set output ""
   spawn {*}$cmd
   expect {
-    -re "Error occured.*" { append output $expect_out(0,string); exp_continue }
+    -re {[Uu]ser:\s*$}     { send "$::BMC_WEB_USER\r"; exp_continue }
+    -re {[Pp]assword:\s*$} { send "$::BMC_WEB_PASS\r"; exp_continue }
+    -re "Error occured.*"  { append output $expect_out(0,string); exp_continue }
     eof {}
   }
   lassign [wait] pid spawnid os_err exit_code
