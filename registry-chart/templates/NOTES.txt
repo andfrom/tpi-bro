@@ -1,0 +1,20 @@
+1) Create TLS + auth secrets (before install), e.g.:
+
+kubectl create secret tls registry-tls \
+  --cert=tls.crt --key=tls.key -n {{ .Release.Namespace }}
+
+kubectl create secret generic registry-htpasswd \
+  --from-file=htpasswd=./htpasswd -n {{ .Release.Namespace }}
+
+2) Install:
+helm upgrade --install registry ./registry-chart -n registry --create-namespace
+
+3) If Service=ClusterIP, port-forward:
+kubectl -n registry port-forward svc/registry 5000:5000
+curl -u push:*** https://localhost:5000/v2/_catalog -k  # until CA trust is installed
+
+4) Add CA trust to laptop and all nodes, then use real HTTPS without -k.
+
+5) Test push/pull:
+docker login https://REG_ADDR:5000
+docker push REG_ADDR:5000/test/hello:tls1

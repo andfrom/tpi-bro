@@ -1,0 +1,24 @@
+# Bootstrap state — contains discovered IPs and passwords; never commit
+bootstrap-state.kv
+bootstrap-state.json
+
+# Old/superseded scripts
+_bootstrap-*.exp
+
+# kubectl binary (too large; users install their own)
+kubectl
+kubectl.sha256
+
+# Generated TLS artefacts
+registry-certs/
+*.key
+*.crt
+*.csr
+*.srl
+*.cnf
+htpasswd
+
+# Editor / OS
+.DS_Store
+*.swp
+*~

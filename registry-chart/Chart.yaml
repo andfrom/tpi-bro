@@ -1,0 +1,6 @@
+apiVersion: v2
+name: registry
+description: Private Docker registry with TLS + htpasswd + persistent storage
+type: application
+version: 0.1.0
+appVersion: "2"

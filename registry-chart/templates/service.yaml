@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+spec:
+  selector: { app: registry }
+  type: {{ .Values.service.type }}
+  ports:
+    - name: https
+      port: {{ .Values.service.port }}
+      targetPort: 5000
+  {{- if and (.Values.loadBalancer.enabled) (eq .Values.service.type "LoadBalancer") }}
+  loadBalancerIP: {{ .Values.loadBalancer.ip }}
+  {{- end }}

@@ -1,0 +1,393 @@
+#!/usr/bin/expect -f
+
+# TuringPi Bootstrap, with options to facilitate pause / resume of
+# the various stages, and also providing a dryrun option to show
+# what actions will be performed for wanted execution scope.
+# Options include
+#   --dry-run,
+#   --from/--to,
+#   --phase,
+#   --flash, and
+#   --help / --usage
+
+# ---------- Defaults ----------
+set SUBNET "192.168.1.0/24"
+set NODE_COUNT 4
+set NODE_PREFIX "rk1-node"
+set DEFAULT_USER "ubuntu"
+set DEFAULT_PASS "ubuntu"
+set NEW_PASS ""                 ;# will prompt once if empty
+set REGISTRY_NODE_IDX 1
+set REGISTRY_PORT 5000
+# Use a simple key=value state file
+set STATE_FILE "./bootstrap-state.kv"
+set FLASH_MODE "skip"           ;# usb|web|skip
+
+# ---------- Stage Registry ----------
+set STAGES {
+  A1_find_bmc
+  A2_poweroff_all
+  A3_flash_optional
+  A4_power_on_and_discover
+  A5_name_password_reboot
+  A6_write_hosts_on_laptop
+  A7_ephemeral_registry_phaseA
+}
+
+# ---------- utils ----------
+proc say {msg} { puts "\n==> $msg" }
+proc sh {cmd} { set f [open "|$cmd 2>@1" r]; set out [read $f]; close $f; return $out }
+proc ask_secret {prompt} { stty -echo; send_user $prompt; expect_user -re "(.*)\n"; stty echo; send_user "\n"; return $expect_out(1,string) }
+proc die {msg} { puts stderr "ERROR: $msg"; exit 1 }
+
+proc print_help {} {
+  upvar STAGES STAGES
+  puts "Turing Pi RK1 Bootstrap (resumable)\n"
+  puts "Usage:"
+  puts "  ./bootstrap-turingpi.exp [--dry-run] [--phase A|B|C] [--from <STAGE>] [--to <STAGE>] [--flash usb|web|skip]"
+  puts ""
+  puts "Options:"
+  puts "  --dry-run           Print actions without making changes"
+  puts "  --phase A|B|C       Shortcut to a stage range (A implemented here)"
+  puts "  --from <STAGE>      Start at a specific stage"
+  puts "  --to <STAGE>        Stop after a specific stage"
+  puts "  --flash usb|web|skip  Choose flashing mode (stubs in this version)"
+  puts "  --help, --usage     Show this help"
+  puts ""
+  puts "Implemented stages:"
+  foreach s $STAGES { puts "  - $s" }
+  puts ""
+  puts "State file: bootstrap-state.kv (auto-saved after each stage)"
+}
+
+# Load key=value file into a dict
+proc kv_load {file} {
+  set m [dict create]
+  if {[file exists $file]} {
+    set f [open $file r]
+    while {[gets $f line] >= 0} {
+      set line [string trim $line]
+      if {$line eq ""} continue
+      if {[string match "#*" $line]} continue
+      if {[regexp {^([^=]+)=(.*)$} $line -> k v]} {
+        dict set m [string trim $k] [string trim $v]
+      }
+    }
+    close $f
+  }
+  return $m
+}
+
+# Save dict back to key=value file
+proc kv_save {file m} {
+  set f [open $file w]
+  # sort keys for stability
+  foreach k [lsort [dict keys $m]] {
+    set v [dict get $m $k]
+    puts $f "$k=$v"
+  }
+  close $f
+}
+
+# Get with default
+proc state_get {m key default} {
+  if {[dict exists $m $key]} {
+    return [dict get $m $key]
+  } else {
+    return $default
+  }
+}
+
+# Put (mutates the dict via upvar)
+proc state_put {mVar key val} {
+  upvar $mVar m
+  dict set m $key $val
+}
+
+# SSH helpers
+proc ssh_ok {ip user pass cmd} {
+  spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$ip $cmd
+  expect {
+    -re "(P|p)assword:" { send "$pass\r"; exp_continue }
+    -re "Are you sure.*" { send "yes\r"; exp_continue }
+    timeout { return 1 }
+    eof {}
+  }
+  return 0
+}
+proc ssh_shell {ip user pass commands} {
+  spawn ssh -tt -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$ip
+  expect {
+    -re "(P|p)assword:" { send "$pass\r"; exp_continue }
+    -re "Are you sure.*" { send "yes\r"; exp_continue }
+    -re "\\$ " { }
+    timeout { return 1 }
+  }
+  foreach c $commands {
+    send -- "$c\r"
+    expect {
+      -re "(?i)\\[sudo\\] password for $user:" { send -- "$pass\r"; exp_continue }
+      -re "\\$ " { }
+      timeout { return 1 }
+    }
+  }
+  send -- "exit\r"; expect eof; return 0
+}
+
+# Checks
+proc check_bmc_known {state} { set ip [state_get $state "bmc_ip" ""]; return [expr {$ip ne ""}] }
+proc check_node_named {ip nodename user pass} {
+  set out [sh "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$ip hostname 2>/dev/null || true"]
+  regsub -all {\n} $out "" out
+  return [expr {$out eq $nodename}]
+}
+proc check_hosts_contains {name ip} {
+  set out [sh "grep -E \"\\b$name\\b\" /etc/hosts || true"]
+  return [expr {[string first $ip $out] >= 0}]
+}
+proc check_registry_http_up {ip port} {
+  set out [sh "curl -sS http://$ip:$port/v2/_catalog || true"]
+  return [expr {[string match *repositories* $out]}]
+}
+
+# Power control & helpers (placeholders)
+proc tpi_power {node action} { say "tpi power $action --node $node   (placeholder)" }
+
+# Discovery helpers
+proc find_bmc {subnet} {
+  say "Scanning $subnet for BMC (hostname likely 'turingpi')"
+  set out [sh "nmap -sn $subnet | grep -B1 'turingpi' | head -n1"]
+  if {$out eq ""} { return "" }
+  set ip ""
+  foreach line [split $out "\n"] {
+    if {[regexp {Nmap scan report for .* \(([\d\.]+)\)} $line -> ipaddr]} { set ip $ipaddr }
+    elseif {[regexp {Nmap scan report for ([\d\.]+)} $line -> ip2]} { set ip $ip2 }
+  }
+  return $ip
+}
+proc discover_nodes {subnet} {
+  set ips {}
+  set out [sh "nmap -sn $subnet | grep 'Nmap scan report for'"]
+  foreach line [split $out "\n"] {
+    if {[regexp {Nmap scan report for ([\d\.]+)} $line -> ip]} { lappend ips $ip }
+  }
+  set good {}
+  foreach ip $ips {
+    set chk [sh "timeout 1 bash -lc 'echo >/dev/tcp/$ip/22' && echo ok || echo no"]
+    if {[string match *ok* $chk]} { lappend good $ip }
+  }
+  return $good
+}
+
+# ---------- Parse Arguments ----------
+set dryrun 0
+set fromStage ""
+set toStage ""
+set phase ""
+for {set i 0} {$i < $argc} {incr i} {
+  set a [lindex $argv $i]
+  switch -- $a {
+    "--dry-run" { set dryrun 1 }
+    "--from"    { incr i; set fromStage [lindex $argv $i] }
+    "--to"      { incr i; set toStage   [lindex $argv $i] }
+    "--phase"   { incr i; set phase     [lindex $argv $i] }
+    "--flash"   { incr i; set FLASH_MODE [lindex $argv $i] }
+    "--help" -
+    "--usage" { print_help; exit 0 }
+    default { }
+  }
+}
+
+# phase shortcuts
+if {$phase ne ""} {
+  switch -- $phase {
+    "A" { set fromStage "A1_find_bmc"; set toStage "A7_ephemeral_registry_phaseA" }
+    "B" { set fromStage "B1_persistent_storage"; set toStage "B8_verify_https_auth" }
+    "C" { set fromStage "C1_local_registry_mirror"; set toStage "C3_sync_resilience" }
+    default { }
+  }
+}
+
+# Helpers to slice stages
+proc stage_index {name} {
+  upvar STAGES STAGES
+  set idx 0
+  foreach s $STAGES { if {$s eq $name} { return $idx } ; incr idx }
+  return -1
+}
+set startIdx 0
+set endIdx [expr {[llength $STAGES]-1}]
+if {$fromStage ne ""} { set i [stage_index $fromStage]; if {$i < 0} { die "Unknown --from $fromStage" } ; set startIdx $i }
+if {$toStage ne ""}   { set j [stage_index $toStage];   if {$j < 0} { die "Unknown --to $toStage" }   ; set endIdx $j }
+
+# ---------- Stage Implementations ----------
+# ----- Stage  A1 -------
+proc stage_A1_find_bmc {dry stateRef} {
+  upvar $stateRef state
+  if {[check_bmc_known $state]} { say "A1: BMC already known"; return }
+  say "A1: Discovering BMC via nmap…"
+  if {$dry} { say "DRY: would run nmap on $::SUBNET"; return }
+  set bmc [find_bmc $::SUBNET]
+  if {$bmc eq ""} { say "Could not auto-detect BMC. Enter IP:"; expect_user -re "(.*)\n"; set bmc $expect_out(1,string) }
+  state_put state "bmc_ip" $bmc
+  say "BMC: $bmc"
+}
+
+# ----- Stage  A2 -------
+proc stage_A2_poweroff_all {dry stateRef} {
+  say "A2: Powering OFF all nodes (tpi placeholder)"
+  if {$dry} { say "DRY: tpi power off 1..$::NODE_COUNT"; return }
+}
+
+# ----- Stage  A3 -------
+proc stage_A3_flash_optional {dry stateRef} {
+  say "A3: Flash mode: $::FLASH_MODE"
+  if {$::FLASH_MODE eq "skip"} { say "Skipping flash"; return }
+  if {$dry} { say "DRY: would flash nodes via $::FLASH_MODE"; return }
+}
+
+# ----- Stage  A4 -------
+proc stage_A4_power_on_and_discover {dry stateRef} {
+  upvar $stateRef state
+  say "A4: Power ON sequentially and discover IPs"
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+    set key "${::NODE_PREFIX}$i"
+    if {[state_get $state $key ""] ne ""} { say "  $key already mapped"; continue }
+    say "  powering on $key (placeholder)"
+    if {$dry} { say "DRY: would tpi power on $i; discover via nmap/ssh"; continue }
+    set ip ""
+    for {set tries 0} {$tries < 24} {incr tries} {
+      set found [discover_nodes $::SUBNET]
+      foreach cand $found {
+        # try default ssh
+        if {[ssh_ok $cand $::DEFAULT_USER $::DEFAULT_PASS "echo ok"] == 0} { set ip $cand; break }
+      }
+      if {$ip ne ""} { break }
+      sleep 5
+    }
+    if {$ip eq ""} { die "Could not discover IP for $key; supply mapping and rerun --from A4" }
+    state_put state "${NODE_PREFIX}$i" $ip
+  }
+}
+
+# ----- Stage  A5 -------
+proc stage_A5_name_password_reboot {dry stateRef} {
+  upvar $stateRef state
+  say "A5: Set hostname + password + reboot"
+
+  if {$dry} {
+    say "DRY: would set NEW_PASS (no prompt), apply hostnames rk1-node{1..$::NODE_COUNT}, and reboot each"
+    for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+      set name "${::NODE_PREFIX}$i"
+      set ip [state_get $state $name ""]
+      if {$ip eq ""} { set ip "<discovered-ip-for-$name>" }
+      say "DRY: $name ($ip): chpasswd, hostnamectl set-hostname $name, add 127.0.1.1 entry, reboot"
+    }
+    return
+  }
+
+  if {$::NEW_PASS eq ""} {
+    set ::NEW_PASS [ask_secret "New password for all RK1 nodes: "]
+  }
+
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+    set name "${::NODE_PREFIX}$i"
+    set ip [state_get $state $name ""]
+    if {$ip eq ""} { die "Missing IP for $name; rerun --from A4" }
+    if {[check_node_named $ip $name $::DEFAULT_USER $::NEW_PASS]} {
+      say "  $name already configured"; continue
+    }
+    set cmds [list \
+      "echo '$::DEFAULT_USER:$::NEW_PASS' | sudo chpasswd" \
+      "sudo hostnamectl set-hostname $name" \
+      "echo '127.0.1.1 $name' | sudo tee -a /etc/hosts >/dev/null" \
+      "sudo reboot" \
+    ]
+    ssh_shell $ip $::DEFAULT_USER $::DEFAULT_PASS $cmds
+    say "  waiting for $name to return…"
+    sleep 10
+    for {set tries 0} {$tries < 24} {incr tries} {
+      if {[ssh_ok $ip $::DEFAULT_USER $::NEW_PASS "hostname"] == 0} { break }
+      sleep 5
+    }
+  }
+}
+
+# ----- Stage  A6 -------
+proc stage_A6_write_hosts_on_laptop {dry stateRef} {
+  upvar $stateRef state
+  say "A6: Update /etc/hosts on laptop"
+  set args {}
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
+    set name "${::NODE_PREFIX}$i"
+    set ip [state_get $state $name ""]
+    if {$ip eq ""} { say "  WARNING: no IP for $name in state — skipping"; continue }
+    lappend args $ip $name
+    say "  [expr {$dry ? {DRY: } : {}}]$ip  $name"
+  }
+  if {$dry || [llength $args] == 0} return
+  set flat [join $args " "]
+  set rc [catch {sh "sudo [file dirname [info script]]/bootstrap-host-helper.sh hosts-append $flat"} out]
+  if {$rc} { say "WARNING: /etc/hosts update failed: $out" } else { say "  /etc/hosts updated" }
+}
+
+# ----- Stage  A7 -------
+proc stage_A7_ephemeral_registry_phaseA {dry stateRef} {
+  upvar $stateRef state
+  set reg "${::NODE_PREFIX}$::REGISTRY_NODE_IDX"
+  set ip [state_get $state $reg ""]
+
+  say "A7: Ephemeral registry on $reg (port $::REGISTRY_PORT)"
+
+  if {$dry} {
+    if {$ip eq ""} { set ip "<ip-$reg>" }
+    say "DRY: would on $reg ($ip):"
+    say "DRY:   apt-get install -y docker.io (if needed)"
+    say "DRY:   systemctl enable --now docker"
+    say "DRY:   docker rm -f registry || true"
+    say "DRY:   docker run -d --name registry --restart=always -p $::REGISTRY_PORT:$::REGISTRY_PORT registry:2"
+    return
+  }
+
+  if {$ip eq ""} { die "Missing IP for $reg; rerun --from A4" }
+
+  set cmds [list \
+    "if ! command -v docker >/dev/null 2>&1; then sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io; fi" \
+    "sudo systemctl enable --now docker" \
+    "sudo docker rm -f registry >/dev/null 2>&1 || true" \
+    "sudo docker run -d --name registry --restart=always -p $::REGISTRY_PORT:$::REGISTRY_PORT registry:2" \
+  ]
+  ssh_shell $ip $::DEFAULT_USER $::NEW_PASS $cmds
+  after 1000
+  if {[check_registry_http_up $ip $::REGISTRY_PORT]} { say "  registry HTTP OK" } else { say "  WARNING: registry not reachable yet; check docker on $reg" }
+}
+
+
+# ---------- run ----------
+# Show help if no args and no state yet (friendly)
+if {$argc == 0} {
+  puts "Tip: run './bootstrap-turingpi.exp --help' for usage."
+}
+
+say "Starting bootstrap (dry-run=$dryrun, from=$fromStage, to=$toStage, phase=$phase, flash=$FLASH_MODE)…"
+set state [kv_load $STATE_FILE]
+set startIdx 0
+set endIdx [expr {[llength $STAGES]-1}]
+# (already set via --from/--to parsing above)
+
+for {set idx $startIdx} {$idx <= $endIdx} {incr idx} {
+  set s [lindex $STAGES $idx]
+  say "Stage $s"
+  switch -- $s {
+    "A1_find_bmc"                 { stage_A1_find_bmc                $dryrun state }
+    "A2_poweroff_all"             { stage_A2_poweroff_all            $dryrun state }
+    "A3_flash_optional"           { stage_A3_flash_optional          $dryrun state }
+    "A4_power_on_and_discover"    { stage_A4_power_on_and_discover   $dryrun state }
+    "A5_name_password_reboot"     { stage_A5_name_password_reboot    $dryrun state }
+    "A6_write_hosts_on_laptop"    { stage_A6_write_hosts_on_laptop   $dryrun state }
+    "A7_ephemeral_registry_phaseA" { stage_A7_ephemeral_registry_phaseA $dryrun state }
+    default { say "  (unimplemented stage placeholder)" }
+  }
+  if {!$dryrun} { kv_save $STATE_FILE $state }
+}
+say "Done."

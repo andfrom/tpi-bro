@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: registry }
+  template:
+    metadata:
+      labels: { app: registry }
+    spec:
+      containers:
+        - name: registry
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 5000
+          env:
+            - name: REGISTRY_HTTP_ADDR
+              value: ":5000"
+          {{- range .Values.registry.extraEnv }}
+            - name: {{ . | splitList "=" | first }}
+              value: "{{ . | splitList "=" | last }}"
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+            - name: config
+              mountPath: /etc/docker/registry
+            {{- if .Values.tls.enabled }}
+            - name: tls
+              mountPath: /certs
+              readOnly: true
+            {{- end }}
+            {{- if .Values.auth.enabled }}
+            - name: auth
+              mountPath: /auth
+              readOnly: true
+            {{- end }}
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: registry-data
+        - name: config
+          configMap:
+            name: registry-config
+            items:
+              - key: config.yml
+                path: config.yml
+        {{- if .Values.tls.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.secretName }}
+        {{- end }}
+        {{- if .Values.auth.enabled }}
+        - name: auth
+          secret:
+            secretName: {{ .Values.auth.secretName }}
+        {{- end }}

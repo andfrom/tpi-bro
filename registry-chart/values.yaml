@@ -1,0 +1,46 @@
+image:
+  repository: registry
+  tag: "2"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 5000
+
+# Use a fixed LoadBalancer IP if you have MetalLB; else keep ClusterIP and port-forward for now.
+loadBalancer:
+  enabled: false
+  ip: "192.168.1.50"   # set if enabled
+
+persistence:
+  enabled: true
+  size: 200Gi
+  storageClass: ""     # set if you have a SC; otherwise default
+
+# TLS: provide your own cert+key (SAN MUST include the IP/hostname you use!)
+tls:
+  enabled: true
+  secretName: registry-tls
+  # You will create this secret from files: tls.crt, tls.key
+
+auth:
+  enabled: true
+  secretName: registry-htpasswd
+  # Create from an htpasswd file (bcrypt). Example:
+  # htpasswd -Bbn push S3cret! > htpasswd
+
+registry:
+  extraEnv: []   # e.g., ["REGISTRY_STORAGE_DELETE_ENABLED=true"]
+  # If you want delete API later, add the env above and restart.
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1
+    memory: 1Gi
