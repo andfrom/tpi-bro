@@ -406,7 +406,7 @@ proc find_bmc {subnet} {
   if {$out eq ""} { return "" }
   set ip ""
   foreach line [split $out "\n"] {
-    if {[regexp {Nmap scan report for .* \(([\d\.]+)\)} $line -> ipaddr]} { set ip $ipaddr }
+    if {[regexp {Nmap scan report for .* \(([\d\.]+)\)} $line -> ipaddr]} { set ip $ipaddr } \
     elseif {[regexp {Nmap scan report for ([\d\.]+)} $line -> ip2]} { set ip $ip2 }
   }
   return $ip
@@ -905,7 +905,7 @@ proc do_rediscover {dry stateRef} {
     if {$old_bmc ne $bmc} { say "  BMC: $old_bmc → $bmc (updated)" } else { say "  BMC: $bmc (unchanged)" }
     state_put state "bmc_ip" $bmc
     set ::BMC_HOST $bmc
-    set bmc_mac [string trim [sh "ip neigh show $bmc 2>/dev/null | grep -oE '([0-9a-f]{2}:)\{5\}[0-9a-f]\{2\}'"]]
+    set bmc_mac [string trim [sh "ip neigh show $bmc 2>/dev/null | grep -oE '(\[0-9a-f\]{2}:){5}\[0-9a-f\]{2}'"]]
     if {$bmc_mac ne ""} { state_put state "bmc_mac" $bmc_mac }
   } else {
     say "  WARNING: BMC not found on subnet — turingpi.local not updated"
@@ -945,7 +945,7 @@ proc do_rediscover {dry stateRef} {
       state_put state $name $ip
       lappend hosts_args $ip $name
       # Refresh MAC
-      set mac [string trim [sh "ip neigh show $ip 2>/dev/null | grep -oE '([0-9a-f]{2}:)\{5\}[0-9a-f]\{2\}'"]]
+      set mac [string trim [sh "ip neigh show $ip 2>/dev/null | grep -oE '(\[0-9a-f\]{2}:){5}\[0-9a-f\]{2}'"]]
       if {$mac ne ""} { state_put state "${name}_mac" $mac }
     } else {
       say "  WARNING: $name not found — keeping existing state entry"
