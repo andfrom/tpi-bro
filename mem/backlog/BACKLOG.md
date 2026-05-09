@@ -130,6 +130,26 @@ PriorityClass for critical agents; ResourceQuota per namespace; eviction policy 
 
 ---
 
+## Configuration & UX
+
+### CFG-01: `~/.turingpi/` home directory for personal config
+**Status:** TODO  
+Currently personal config files (`bootstrap-config.kv`, `images-manifest.kv`, `bmc-manifest.kv`) and image downloads live gitignored in the repo root — conflating the tool with the installation. A standard home directory would be cleaner:
+
+```
+~/.turingpi/
+  bootstrap-config.kv     # auto-loaded if no repo-local config and no --config flag
+  images-manifest.kv      # default image manifest
+  bmc-manifest.kv         # default BMC firmware manifest
+  image-cache/            # downloaded images (can be large; shared across clones)
+  clusters/               # future: named profiles for multiple clusters
+```
+
+Auto-load priority order: `--config FILE` (explicit) > `./bootstrap-config.kv` (repo-local) > `~/.turingpi/bootstrap-config.kv` (user-global).  
+Opt-in, not mandatory — existing repo-local workflow still works.
+
+---
+
 ## Documentation
 
 ### DOC-01: Expand README with BMC reconnection steps
