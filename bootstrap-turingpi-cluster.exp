@@ -334,8 +334,8 @@ proc tpi_flash_node {node_idx img_or_local} {
   set output ""
   spawn {*}$cmd
   expect {
-    -re {[Uu]ser:\s*$}     { send "$::BMC_WEB_USER\r"; exp_continue }
-    -re {[Pp]assword:\s*$} { send "$::BMC_WEB_PASS\r"; exp_continue }
+    -re {[Uu]ser:}     { send "$::BMC_WEB_USER\r"; exp_continue }
+    -re {[Pp]assword:} { send "$::BMC_WEB_PASS\r"; exp_continue }
     -re "Error occured.*"  { append output $expect_out(0,string); exp_continue }
     eof {}
   }
@@ -398,8 +398,8 @@ proc tpi_flash_node_bmc {node_idx bmc_path} {
   set output ""
   spawn {*}$cmd
   expect {
-    -re {[Uu]ser:\s*$}     { send "$::BMC_WEB_USER\r"; exp_continue }
-    -re {[Pp]assword:\s*$} { send "$::BMC_WEB_PASS\r"; exp_continue }
+    -re {[Uu]ser:}     { send "$::BMC_WEB_USER\r"; exp_continue }
+    -re {[Pp]assword:} { send "$::BMC_WEB_PASS\r"; exp_continue }
     -re "Error occured.*"  { append output $expect_out(0,string); exp_continue }
     eof {}
   }
