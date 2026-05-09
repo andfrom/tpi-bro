@@ -727,10 +727,29 @@ proc stage_A4_power_on_and_discover {dry stateRef} {
   for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
     set name "${::NODE_PREFIX}$i"
     set known [state_get $state $name ""]
-    if {$known ne ""} { say "  $name: already mapped to $known — skipping"; continue }
 
     if {$dry} {
-      say "DRY: tpi power on -n $i; scan $::SUBNET for new SSH host; map to $name"
+      if {$known ne ""} {
+        say "DRY: tpi power on -n $i; wait for $known to boot (IP already known)"
+      } else {
+        say "DRY: tpi power on -n $i; scan $::SUBNET for new SSH host; map to $name"
+      }
+      continue
+    }
+
+    if {$known ne ""} {
+      # IP already discovered from a prior run — power on and wait for SSH.
+      say "  $name: IP already known ($known) — powering on and waiting for SSH…"
+      tpi_power $i "on"
+      set deadline [expr {[clock seconds] + 150}]
+      set up 0
+      while {[clock seconds] < $deadline} {
+        set chk [string trim [sh "timeout 1 bash -c 'echo >/dev/tcp/$known/22' 2>/dev/null && echo ok || echo no"]]
+        if {$chk eq "ok"} { set up 1; break }
+        after 5000
+      }
+      if {!$up} { die "$name did not come up within 150 s at $known.\nFix then rerun --from A4." }
+      say "  $name up at $known"
       continue
     }
 
@@ -757,7 +776,7 @@ proc stage_A4_power_on_and_discover {dry stateRef} {
 
     # Extract MAC from the laptop's ARP table (populated by the SSH probe above).
     # Used to help operator configure static DHCP reservations in their router.
-    set mac [string trim [sh "ip neigh show $ip 2>/dev/null | grep -oE '([0-9a-f]{2}:)\{5\}[0-9a-f]\{2\}'"]]
+    set mac [string trim [sh "ip neigh show $ip 2>/dev/null | grep -oE '(\[0-9a-f\]{2}:){5}\[0-9a-f\]{2}'"]]
     if {$mac ne ""} {
       state_put state "${name}_mac" $mac
       say "  $name → $ip  (MAC $mac)"
