@@ -667,7 +667,7 @@ When both `--phase A` and `--from StageName` are passed, `--phase` wins and
 sets the start stage to the first stage of the phase. Use `--from` and `--to`
 without `--phase` to resume from a specific stage:
 ```bash
-./bootstrap-turingpi-cluster.exp \
+./scripts/bootstrap-turingpi-cluster.exp \
   --from A4_power_on_and_discover \
   --to A7_ephemeral_registry_phaseA \
   --flash bmc --manifest images-manifest-bmc.kv

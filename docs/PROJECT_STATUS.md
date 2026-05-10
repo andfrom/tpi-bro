@@ -48,7 +48,7 @@ Phase B is entirely Helm/GitOps — **no Expect stages**. The Expect script's jo
 | B1-kubeconfig | `prep-kubeconfig-local.sh` — laptop kubectl access | Not started |
 | B2-certs | `gen-registry-certs.sh` (multi-SAN: hostname + static IP + future MetalLB VIP) | Script exists (partial); not run |
 | B2-storage | Persistent volume for registry data | Not started |
-| B2-registry | Upgrade to TLS+auth via `registry-chart/` Helm chart | Chart exists; not deployed |
+| B2-registry | Upgrade to TLS+auth via `charts/registry/` Helm chart | Chart exists; not deployed |
 | B2-ca | `install-ca.sh` — distribute CA cert to all nodes + containerd mirror config | Not started |
 | B2-verify | End-to-end `docker login` + push + k3s pull smoke test | Not done |
 | B3-makefile | `Makefile` orchestrating all Phase B steps | Not started |
@@ -84,7 +84,7 @@ IPs, MACs, and other operational details are in `bootstrap-state.kv` (gitignored
 
 **BMC:** `turingpi.local` — accessible over WiFi.
 
-**⚠ DHCP reservations not yet configured.** All 4 node IPs drift on every reboot. Use `./bootstrap-turingpi-cluster.exp --rediscover` after any power cycle until static reservations are set in the router (MACs available from `bootstrap-state.kv` or from A4 output).
+**⚠ DHCP reservations not yet configured.** All 4 node IPs drift on every reboot. Use `./scripts/bootstrap-turingpi-cluster.exp --rediscover` after any power cycle until static reservations are set in the router (MACs available from `bootstrap-state.kv` or from A4 output).
 
 ---
 
@@ -95,4 +95,4 @@ IPs, MACs, and other operational details are in `bootstrap-state.kv` (gitignored
 3. **B-01**: Install k3s on node1 (server role)
 4. **B-02**: Join nodes 2–4 as k3s workers
 5. **B-03**: Configure containerd registry mirror on all nodes
-6. **B-04**: Deploy persistent registry via `registry-chart/`
+6. **B-04**: Deploy persistent registry via `charts/registry/`

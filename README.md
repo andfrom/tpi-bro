@@ -15,17 +15,17 @@ Assumes the board is assembled and powered on, nodes have Ubuntu flashed, and `t
 ```bash
 # 1. Clone and make scripts executable
 git clone https://github.com/your-org/tpi-bro && cd tpi-bro
-chmod +x bootstrap-turingpi-cluster.exp teardown-cluster.exp bootstrap-host-helper.sh
+chmod +x scripts/*.sh scripts/*.exp
 
 # 2. Create your local config (edit SUBNET to match your LAN)
 cp bootstrap-config.kv.example bootstrap-config.kv
 $EDITOR bootstrap-config.kv
 
 # 3. Dry-run to verify everything looks right (no changes made)
-./bootstrap-turingpi-cluster.exp --dry-run --phase A
+./scripts/bootstrap-turingpi-cluster.exp --dry-run --phase A
 
 # 4. Run Phase A — discover BMC, name nodes, set password, start registry
-./bootstrap-turingpi-cluster.exp --phase A
+./scripts/bootstrap-turingpi-cluster.exp --phase A
 
 # 5. Verify
 ssh ubuntu@rk1-node1 hostname
@@ -36,7 +36,7 @@ After step 4 you have: 4 named nodes (`rk1-node{1..4}`), SSH access by hostname,
 
 **Need to reflash nodes first?** See [Flashing compute modules](#flashing-compute-modules).  
 **BMC firmware out of date?** See [BMC firmware (A0)](#bmc-firmware-a0).  
-**Starting over?** `./teardown-cluster.exp && ./bootstrap-turingpi-cluster.exp --phase A`
+**Starting over?** `./scripts/teardown-cluster.exp && ./scripts/bootstrap-turingpi-cluster.exp --phase A`
 
 ---
 
@@ -102,37 +102,15 @@ The Expect script is designed to be:
 
 ### Prerequisites
 
-#### On your laptop (where you run the script)
+See [docs/PREREQUISITES.md](docs/PREREQUISITES.md) for the full list of required tools, install commands, and distribution support notes.
 
-Install the following tools. All are standard and available via your system package manager.
-
-| Tool | Purpose | Install (Ubuntu/Debian) |
-|------|---------|------------------------|
-| `expect` | Drive the bootstrap script | `sudo apt install expect` |
-| `bash` | Helper scripts | Pre-installed |
-| `ssh` | Node access | `sudo apt install openssh-client` |
-| `nmap` | BMC and node discovery | `sudo apt install nmap` |
-| `curl` | Health checks | `sudo apt install curl` |
-| `tpi` CLI | BMC power / flash control | See below |
-| `docker` | Image build and push (Phase B+) | [docs.docker.com](https://docs.docker.com/engine/install/) |
-| `helm` | Deploy Helm charts (Phase B+) | [helm.sh/docs](https://helm.sh/docs/intro/install/) |
-| `kubectl` | Cluster management (Phase B+) | [kubernetes.io](https://kubernetes.io/docs/tasks/tools/) |
-
-**Installing the `tpi` CLI:**
-
-The `tpi` tool communicates with the TuringPi BMC (Baseboard Management Controller) to power nodes on/off and flash firmware. Install it on your laptop — it does not run on the nodes themselves.
-
+**Short version — Ubuntu/Debian one-liner:**
 ```bash
-# Download from the TuringPi release page and place in your PATH
-# See https://docs.turingpi.com/docs/turing-pi2-bmc-intro-specs for current version
+sudo apt update && sudo apt install -y \
+  expect openssh-client sshpass nmap curl \
+  openssl apache2-utils
 ```
-
-After installing, authenticate once:
-```bash
-tpi login              # prompts for BMC credentials; cached after first use
-```
-
-The BMC is reachable at `turingpi.local` by default (mDNS). This works over both Ethernet and WiFi on most networks. If mDNS fails, find the BMC IP by scanning your router's DHCP table or running `nmap -sn 192.168.1.0/24` and looking for the TuringPi device.
+Then install `tpi`, `kubectl`, `helm`, and `docker` per [docs/PREREQUISITES.md](docs/PREREQUISITES.md).
 
 #### On the RK1 nodes
 
@@ -148,25 +126,33 @@ Stages A1 and A6 update `/etc/hosts` on your laptop (A1 pins the BMC, A6 pins th
 
 ### Files
 
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
-| `bootstrap-turingpi-cluster.exp` | Main bootstrap Expect script (staged, resumable, `--rediscover` mode) |
-| `teardown-cluster.exp` | Reverses Phase A — resets nodes to a re-bootstrappable state |
-| `bootstrap-host-helper.sh` | Manages `/etc/hosts` entries (`hosts-append` / `hosts-remove`) |
+| `scripts/bootstrap-turingpi-cluster.exp` | Main bootstrap Expect script (staged, resumable, `--rediscover` mode) |
+| `scripts/teardown-cluster.exp` | Reverses Phase A — resets nodes to a re-bootstrappable state |
+| `scripts/bootstrap-host-helper.sh` | Manages `/etc/hosts` entries (`hosts-append` / `hosts-remove`) |
+| `scripts/setup-static-ips.sh` | Phase B0: configure static IPs on BMC and all nodes |
+| `scripts/setup-ssh-keys.sh` | Phase B0: distribute SSH key + passwordless sudo to all nodes |
+| `scripts/install-k3s.sh` | Phase B1: install k3s server and agents |
+| `scripts/gen-registry-certs.sh` | Phase B2: generate TLS certificates for the registry |
+| `scripts/install-ca.sh` | Phase B2: install CA cert + containerd mirror config on a node |
+| `scripts/setup-registry.sh` | Phase B2: full orchestration — certs → chart deploy → CA distribute |
+| `charts/registry/` | Helm chart for the persistent Phase B registry |
+| `bin/kubectl` | Vendored `kubectl` binary pinned to the cluster version |
 | `bootstrap-state.kv` | Generated state file — discovered IPs, MACs, BMC address (gitignored) |
 | `bootstrap-config.kv` | Local config overrides — subnet, node count, flash mode, etc. (gitignored) |
 | `bootstrap-config.kv.example` | Template documenting all config variables |
 | `images-manifest.kv.example` | Template for `--flash download` image manifest |
 | `bmc-manifest.kv.example` | Template for A0 BMC firmware check/upgrade |
-| `gen-registry-certs.sh` | Generates TLS certificates for the Phase B registry |
-| `registry-chart/` | Helm chart for the persistent Phase B registry |
 | `tests/run-ci.sh` | CI test runner — Suites 1+2, no hardware required |
 | `tests/run-hardware.sh` | Hardware test runner — Suite 3, full cluster cycles |
+| `docs/` | PREREQUISITES, TROUBLESHOOTING, and status documents |
+| `mem/adr/` | Architecture Decision Records |
 
 Make the scripts executable:
 
 ```bash
-chmod +x bootstrap-turingpi-cluster.exp teardown-cluster.exp bootstrap-host-helper.sh gen-registry-certs.sh
+chmod +x scripts/*.sh scripts/*.exp
 ```
 
 ---
@@ -176,31 +162,31 @@ chmod +x bootstrap-turingpi-cluster.exp teardown-cluster.exp bootstrap-host-help
 #### Show help
 
 ```bash
-./bootstrap-turingpi-cluster.exp --help
+./scripts/bootstrap-turingpi-cluster.exp --help
 ```
 
 #### Run everything in Phase A (real run)
 
 ```bash
-./bootstrap-turingpi-cluster.exp --phase A
+./scripts/bootstrap-turingpi-cluster.exp --phase A
 ```
 
 #### Dry-run all of Phase A (prints actions, but no changes)
 
 ```bash
-./bootstrap-turingpi-cluster.exp --dry-run --phase A
+./scripts/bootstrap-turingpi-cluster.exp --dry-run --phase A
 ```
 
 #### Run a slice by stage name (in example, up to node discovery)
 
 ```bash
-./bootstrap-turingpi-cluster.exp --from A1_find_bmc --to A4_power_on_and_discover
+./scripts/bootstrap-turingpi-cluster.exp --from A1_find_bmc --to A4_power_on_and_discover
 ```
 
 #### Resume from naming/password/reboot step (after fixing an issue)
 
 ```bash
-./bootstrap-turingpi-cluster.exp --from A5_name_password_reboot
+./scripts/bootstrap-turingpi-cluster.exp --from A5_name_password_reboot
 ```
 
 #### Use a config file
@@ -215,7 +201,7 @@ cp bootstrap-config.kv.example bootstrap-config.kv
 Or pass an explicit config file (multiple `--config` flags allowed):
 
 ```bash
-./bootstrap-turingpi-cluster.exp --config /path/to/my-config.kv --dry-run --phase A
+./scripts/bootstrap-turingpi-cluster.exp --config /path/to/my-config.kv --dry-run --phase A
 ```
 
 CLI flags always override config file values.
@@ -223,11 +209,11 @@ CLI flags always override config file values.
 #### Choose flashing mode (see also: [Flashing compute modules](#flashing-compute-modules))
 
 ```bash
-./bootstrap-turingpi-cluster.exp --phase A --flash skip      # default — no flashing
-./bootstrap-turingpi-cluster.exp --phase A --flash local     # tpi flash --local per node
-./bootstrap-turingpi-cluster.exp --phase A --flash image \   # flash per-node image file
+./scripts/bootstrap-turingpi-cluster.exp --phase A --flash skip      # default — no flashing
+./scripts/bootstrap-turingpi-cluster.exp --phase A --flash local     # tpi flash --local per node
+./scripts/bootstrap-turingpi-cluster.exp --phase A --flash image \   # flash per-node image file
     --image worker.img --image-1 server.img
-./bootstrap-turingpi-cluster.exp --phase A --flash download \ # download + SHA256 verify
+./scripts/bootstrap-turingpi-cluster.exp --phase A --flash download \ # download + SHA256 verify
     --manifest images-manifest.kv
 ```
 
@@ -236,8 +222,8 @@ CLI flags always override config file values.
 If DHCP has reassigned node IPs since the last run (e.g. after WiFi dropped), use `--rediscover`. It scans the subnet, identifies each node by its SSH hostname, and rewrites `/etc/hosts` and `bootstrap-state.kv` with the new IPs. No power cycling, no password changes.
 
 ```bash
-./bootstrap-turingpi-cluster.exp --rediscover
-./bootstrap-turingpi-cluster.exp --dry-run --rediscover   # preview only
+./scripts/bootstrap-turingpi-cluster.exp --rediscover
+./scripts/bootstrap-turingpi-cluster.exp --dry-run --rediscover   # preview only
 ```
 
 ---
@@ -328,7 +314,7 @@ A1 will then run `tpi` with that IP and pin it. Subsequent stages and reruns use
 Set static DHCP reservations using the MAC table printed by A4 (see [DHCP and IP stability](#dhcp-and-ip-stability) above). If IPs have already drifted, run:
 
 ```bash
-./bootstrap-turingpi-cluster.exp --rediscover
+./scripts/bootstrap-turingpi-cluster.exp --rediscover
 ```
 
 This scans the subnet, identifies nodes by SSH hostname, and updates both `/etc/hosts` and the state file. No power cycling.
@@ -377,7 +363,7 @@ default.sha256=<sha256 of the file at that URL>
 Copy to `images-manifest.kv`, fill in real values, then:
 
 ```bash
-./bootstrap-turingpi-cluster.exp --phase A --flash download --manifest images-manifest.kv
+./scripts/bootstrap-turingpi-cluster.exp --phase A --flash download --manifest images-manifest.kv
 ```
 
 ---
@@ -388,15 +374,15 @@ Stage A0 runs before A1 and handles BMC firmware. It is skipped by default.
 
 ```bash
 # Check whether the running BMC version matches the manifest
-./bootstrap-turingpi-cluster.exp --from A0_bmc_firmware --to A0_bmc_firmware \
+./scripts/bootstrap-turingpi-cluster.exp --from A0_bmc_firmware --to A0_bmc_firmware \
     --bmc-firmware check --bmc-manifest bmc-manifest.kv
 
 # Upgrade if outdated
-./bootstrap-turingpi-cluster.exp --from A0_bmc_firmware --to A0_bmc_firmware \
+./scripts/bootstrap-turingpi-cluster.exp --from A0_bmc_firmware --to A0_bmc_firmware \
     --bmc-firmware upgrade --bmc-manifest bmc-manifest.kv
 
 # Dry-run (never touches the BMC)
-./bootstrap-turingpi-cluster.exp --dry-run --from A0_bmc_firmware --to A0_bmc_firmware \
+./scripts/bootstrap-turingpi-cluster.exp --dry-run --from A0_bmc_firmware --to A0_bmc_firmware \
     --bmc-firmware upgrade
 ```
 
@@ -418,7 +404,7 @@ Populate `bmc-manifest.kv` from `bmc-manifest.kv.example` with the firmware URL 
 
 The CI suite (Suites 1+2, 27 tests) runs automatically in GitHub Actions on every
 push and PR. Suite 3 (hardware) runs manually before significant merges. See
-[TEST_STATUS.md](TEST_STATUS.md) for the full path map and coverage details.
+[docs/TEST_STATUS.md](docs/TEST_STATUS.md) for the full path map and coverage details.
 
 ---
 
@@ -448,11 +434,11 @@ The bootstrap is intentionally forward-only (idempotent stages, check→act). Te
 ### Teardown usage
 
 ```bash
-./teardown-cluster.exp                    # full teardown (prompts for current node password)
-./teardown-cluster.exp --dry-run          # preview all actions
-./teardown-cluster.exp --remove-docker    # also uninstall Docker from registry node
-./teardown-cluster.exp --keep-hostname    # skip hostname reset (bootstrap overwrites anyway)
-./teardown-cluster.exp --from T3_stop_registry  # resume from a specific stage
+./scripts/teardown-cluster.exp                    # full teardown (prompts for current node password)
+./scripts/teardown-cluster.exp --dry-run          # preview all actions
+./scripts/teardown-cluster.exp --remove-docker    # also uninstall Docker from registry node
+./scripts/teardown-cluster.exp --keep-hostname    # skip hostname reset (bootstrap overwrites anyway)
+./scripts/teardown-cluster.exp --from T3_stop_registry  # resume from a specific stage
 ```
 
 T1 is resilient to IP drift — it tries stored IPs first, then falls back to scanning the subnet and identifying nodes by their SSH hostname. You do not need a valid state file to run teardown.
@@ -460,8 +446,8 @@ T1 is resilient to IP drift — it tries stored IPs first, then falls back to sc
 ### Full reinstall cycle
 
 ```bash
-./teardown-cluster.exp                    # reset to factory-equivalent state
-./bootstrap-turingpi-cluster.exp --phase A  # fresh Phase A from scratch
+./scripts/teardown-cluster.exp                    # reset to factory-equivalent state
+./scripts/bootstrap-turingpi-cluster.exp --phase A  # fresh Phase A from scratch
 ```
 
 ---
@@ -565,7 +551,7 @@ Supporting services (API gateway, vector DB, queue, metrics) are stateless or di
 
 ## Project Status
 
-See [PROJECT_STATUS.md](PROJECT_STATUS.md) for phase-by-phase status and [DEPLOYMENT_STATUS.md](DEPLOYMENT_STATUS.md) for hardware/software inventory.
+See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for phase-by-phase status and [docs/DEPLOYMENT_STATUS.md](docs/DEPLOYMENT_STATUS.md) for hardware/software inventory.
 
 Open work items are tracked in [mem/backlog/BACKLOG.md](mem/backlog/BACKLOG.md).
 

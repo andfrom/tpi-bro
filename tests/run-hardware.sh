@@ -17,8 +17,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-BOOTSTRAP="./bootstrap-turingpi-cluster.exp"
-TEARDOWN="./teardown-cluster.exp"
+BOOTSTRAP="./scripts/bootstrap-turingpi-cluster.exp"
+TEARDOWN="./scripts/teardown-cluster.exp"
 
 CYCLES=2
 NODE_PASS=""

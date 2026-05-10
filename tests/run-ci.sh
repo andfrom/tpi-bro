@@ -16,8 +16,8 @@ cd "$(dirname "$0")/.."
 export BOOTSTRAP_NO_AUTO_CONFIG=1
 export BOOTSTRAP_NO_AUTO_STATE=1
 
-BOOTSTRAP="./bootstrap-turingpi-cluster.exp"
-TEARDOWN="./teardown-cluster.exp"
+BOOTSTRAP="./scripts/bootstrap-turingpi-cluster.exp"
+TEARDOWN="./scripts/teardown-cluster.exp"
 FIXTURES="./tests/fixtures"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

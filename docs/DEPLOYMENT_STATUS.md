@@ -35,7 +35,7 @@ _Last updated: 2026-05-10_
 | Orchestrator | k3s | Not installed |
 | GitOps | Argo CD or Flux (TBD) | Not installed |
 | Registry (Phase A) | registry:2 container, HTTP, port 5000 | Running on node1 |
-| Registry (Phase B) | Helm chart (`registry-chart/`), TLS + auth | Not deployed |
+| Registry (Phase B) | Helm chart (`charts/registry/`), TLS + auth | Not deployed |
 | LLM runtime | Ollama | Not installed |
 | Ingress | Traefik (k3s built-in) | Not installed |
 
