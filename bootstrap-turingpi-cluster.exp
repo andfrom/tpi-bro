@@ -78,7 +78,7 @@ proc ask_secret {prompt} {
 proc ask_yn {prompt} {
   send_user "$prompt \[y/N\] "
   set ans ""
-  expect_user { -timeout -1; -re "(.*)\n" { set ans [string trim [string tolower $expect_out(1,string)]] } }
+  expect_user -timeout -1 -re "(.*)\n" { set ans [string trim [string tolower $expect_out(1,string)]] }
   send_user "\n"
   return [expr {$ans eq "y" || $ans eq "yes"}]
 }
@@ -238,8 +238,10 @@ proc wait_for_ssh_gone {ip user deadline_s} {
   }
   return 0
 }
-proc ssh_shell {ip user pass commands} {
-  spawn ssh -tt -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $user@$ip
+proc ssh_shell {ip user pass commands {cmd_timeout 60}} {
+  set timeout $cmd_timeout
+  spawn ssh -tt -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 $user@$ip
   expect {
     -re "(P|p)assword:" { send "$pass\r"; exp_continue }
     -re "Are you sure.*" { send "yes\r"; exp_continue }
@@ -1051,14 +1053,14 @@ proc stage_A4_power_on_and_discover {dry stateRef} {
       # IP already discovered from a prior run — power on and wait for SSH.
       say "  $name: IP already known ($known) — powering on and waiting for SSH…"
       tpi_power $i "on"
-      set deadline [expr {[clock seconds] + 150}]
+      set deadline [expr {[clock seconds] + 300}]
       set up 0
       while {[clock seconds] < $deadline} {
         set chk [string trim [sh "timeout 1 bash -c 'echo >/dev/tcp/$known/22' 2>/dev/null && echo ok || echo no"]]
         if {$chk eq "ok"} { set up 1; break }
         after 5000
       }
-      if {!$up} { die "$name did not come up within 150 s at $known.\nFix then rerun --from A4." }
+      if {!$up} { die "$name did not come up within 300 s at $known.\nFix then rerun --from A4_power_on_and_discover." }
       say "  $name up at $known"
       continue
     }
@@ -1076,11 +1078,11 @@ proc stage_A4_power_on_and_discover {dry stateRef} {
 
     # Wait for the new node to appear. No fixed sleep — each nmap scan in
     # wait_for_new_ssh_host takes a few seconds and provides natural pacing.
-    say "  Waiting for $name to boot and appear on network (up to 150 s)…"
-    set ip [wait_for_new_ssh_host $baseline $::SUBNET $::DEFAULT_USER $::DEFAULT_PASS 150]
+    say "  Waiting for $name to boot and appear on network (up to 300 s)…"
+    set ip [wait_for_new_ssh_host $baseline $::SUBNET $::DEFAULT_USER $::DEFAULT_PASS 300]
 
     if {$ip eq ""} {
-      die "Could not discover IP for $name within 150 s.\nCheck: power LED on, DHCP running, subnet correct.\nFix then rerun --from A4, or add \"$name=<ip>\" to $::STATE_FILE and rerun --from A5."
+      die "Could not discover IP for $name within 300 s.\nCheck: power LED on, DHCP running, subnet correct.\nFix then rerun --from A4_power_on_and_discover, or add \"$name=<ip>\" to $::STATE_FILE and rerun --from A5_setup_nodes."
     }
     state_put state $name $ip
 
@@ -1205,8 +1207,15 @@ proc stage_A7_ephemeral_registry_phaseA {dry stateRef} {
     return
   }
 
-  if {$ip eq ""} { die "Missing IP for $reg; rerun --from A4" }
+  if {$ip eq ""} { die "Missing IP for $reg; rerun --from A4_power_on_and_discover" }
   if {$::NEW_PASS eq ""} { set ::NEW_PASS [ask_secret "Node password (set during A5): "] }
+
+  say "  Waiting for $reg to accept SSH…"
+  set _deadline [expr {[clock seconds] + 60}]
+  while {[clock seconds] < $_deadline} {
+    if {[ssh_ok $ip $::DEFAULT_USER $::NEW_PASS "hostname"] == 0} break
+    after 5000
+  }
 
   set cmds [list \
     "if ! command -v docker >/dev/null 2>&1; then curl -fsSL https://get.docker.com | sudo sh; fi" \
@@ -1214,8 +1223,8 @@ proc stage_A7_ephemeral_registry_phaseA {dry stateRef} {
     "sudo docker rm -f registry >/dev/null 2>&1 || true" \
     "sudo docker run -d --name registry --restart=always -p $::REGISTRY_PORT:$::REGISTRY_PORT registry:2" \
   ]
-  ssh_shell $ip $::DEFAULT_USER $::NEW_PASS $cmds
-  after 1000
+  ssh_shell $ip $::DEFAULT_USER $::NEW_PASS $cmds 600
+  after 2000
   if {[check_registry_http_up $ip $::REGISTRY_PORT]} { say "  registry HTTP OK" } else { say "  WARNING: registry not reachable yet; check docker on $reg" }
 }
 
