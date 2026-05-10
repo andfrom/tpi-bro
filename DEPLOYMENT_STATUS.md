@@ -1,6 +1,6 @@
 # tpi-bro — Deployment Status
 
-_Last updated: 2026-05-09_
+_Last updated: 2026-05-10_
 
 ## Cluster Hardware
 
@@ -13,7 +13,7 @@ _Last updated: 2026-05-09_
 | GPU | Mali G610 MP4 (display / OpenCL only — not useful for LLM inference) |
 | NPU | 6 TOPS per module |
 | Estimated power | ~10 W per module at idle |
-| Registry node IP | 192.168.1.115 (rk1-node1, known from TLS cert SAN) |
+| Registry node IP | DHCP — configure static reservation before Phase B; see `bootstrap-state.kv` |
 | BMC hostname | `turingpi.local` (mDNS) |
 
 ## Node Role Assignment (planned)
@@ -29,7 +29,7 @@ _Last updated: 2026-05-09_
 
 | Layer | Tool | Status |
 |-------|------|--------|
-| OS | Ubuntu (standard RK1 image) | Deployed on all nodes |
+| OS | Ubuntu 24.04.1 LTS ARM64 (joshua-riek/ubuntu-rockchip v2.4.0) | Deployed on all 4 nodes (2026-05-10) |
 | Container runtime (Phase A) | Docker (node1 only, for registry) | Running |
 | Container runtime (Phase B) | containerd (via k3s) | Not started |
 | Orchestrator | k3s | Not installed |
@@ -52,8 +52,8 @@ _Last updated: 2026-05-09_
 ## Registry TLS Cert Status
 
 - `gen-registry-certs.sh` script exists and is ready to run
-- SAN includes: `rk1-node1`, `192.168.1.115`
-- Certs not yet generated (Phase B pre-requisite)
+- SAN includes: `rk1-node1`, and the planned static IP for node1 (update before generating)
+- Certs not yet generated (Phase B pre-requisite; configure DHCP reservation for node1 first so the IP in the SAN is stable)
 - Generated artefacts are `.gitignore`d (`registry-certs/`, `*.key`, `*.crt`, etc.)
 
 ## Laptop Requirements
@@ -72,5 +72,6 @@ _Last updated: 2026-05-09_
 ## Known Issues
 
 - `turingpi.local` mDNS resolution can fail when only WiFi is available on some networks; fall back to scanning router DHCP table or using `nmap` on the LAN subnet
-- DHCP leases for nodes 2–4 may change after power cycle — IPs need re-discovery or static reservation
+- **DHCP leases for all 4 nodes drift on every reboot** — confirmed in validation run 2026-05-10; all nodes received new IPs after each A5 reboot. Configure static DHCP reservations in the router before Phase B. Use `--rediscover` to sync state + `/etc/hosts` after any power cycle until then.
 - Phase A registry is HTTP-only; laptop Docker daemon must have `rk1-node1:5000` in `insecure-registries`
+- Ubuntu 24.04.1 LTS (like 24.10) enforces a mandatory password change on first boot; the bootstrap script handles this automatically via `unlock_expired_password`

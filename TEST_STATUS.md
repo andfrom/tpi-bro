@@ -1,6 +1,6 @@
 # tpi-bro — Test Status & Coverage Map
 
-_Last updated: 2026-05-09_
+_Last updated: 2026-05-10_
 
 ## Current state
 
@@ -87,13 +87,23 @@ bootstrap-turingpi-cluster.exp
     │   │       ├── cache miss + download OK + SHA256 OK ── store in cache, flash
     │   │       ├── cache miss + download fails ──────── die ✗  (partial file deleted)
     │   │       └── cache miss + SHA256 mismatch ─────── die ✗  + MitM warning
+    │   ├── bmc
+    │   │   ├── BMC SD card not mounted ─────────────── die ✗
+    │   │   ├── manifest file missing ────────────────── die ✗
+    │   │   ├── unknown image type for node ──────────── die ✗
+    │   │   ├── stale images on SD card → ask_yn prompt (y deletes, N skips)
+    │   │   ├── image already on SD card (SHA256 OK) ── skip download, flash directly
+    │   │   └── real  (SSH to BMC; per distinct image type)
+    │   │       ├── curl download + SHA256 OK ──────── decompress .xz on BMC; flash --local
+    │   │       ├── curl download fails ──────────────── die ✗
+    │   │       └── SHA256 mismatch ─────────────────── die ✗
     │   └── invalid FLASH_MODE ───────────────────────── die ✗
     │
     ├── A4  power_on_and_discover
     │   └── per node
     │       ├── node already in state ──────────────── skip
     │       ├── dry ────────────────────────────────── print plan
-    │       ├── node appears within 150 s
+    │       ├── node appears within 300 s
     │       │   ├── MAC in ARP ──────────────────── store ip + mac
     │       │   └── MAC not in ARP ──────────────── store ip only
     │       └── node never appears (timeout) ────────── die ✗  (with recovery hint)

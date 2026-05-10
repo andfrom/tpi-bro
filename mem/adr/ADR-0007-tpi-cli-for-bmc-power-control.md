@@ -33,8 +33,15 @@ Key commands used in this repo:
 - mDNS (`turingpi.local`) may fail if Ethernet cable is not connected and WiFi mDNS propagation is inconsistent on the LAN
 - The `tpi` binary is not open source — behavior may change with firmware updates
 
-## Notes
+## Implementation note (updated 2026-05-10)
 
-All power and flash calls are implemented as real `exec {*}$args` Expect calls. A2 calls `tpi power off`, A4 calls `tpi power on -n N` per node, A3 (download/image modes) calls `tpi flash -n N --image-path FILE`, and A0 (upgrade mode) calls `tpi firmware --file FILE` followed by a BMC reboot wait.
+The original implementation used `exec tpi --host $BMC_HOST ...` from the laptop. This was found to hang in practice: `tpi --host` without prior web-UI authentication waits on stdin for credentials, blocking the Expect script indefinitely.
 
-Default BMC host: `turingpi.local`. If mDNS fails before A1 has run, set `BMC_HOST` in `bootstrap-config.kv` or pass `--host` explicitly. A1 pins the BMC IP in `/etc/hosts` so subsequent runs and teardown do not depend on mDNS.
+**All `tpi` invocations were moved to run on the BMC itself via SSH** (`bmc_cmd` proc). The script SSHes to `root@$BMC_HOST` and runs `tpi power …` / `tpi flash …` there. The `tpi` binary on the BMC communicates with `bmcd` over localhost and requires no external authentication.
+
+This means:
+- `tpi` does **not** need to be installed on the operator's laptop (though it can still be used manually for ad-hoc commands)
+- All script-driven BMC calls go through `bmc_cmd` / `bmc_stream` (streaming variant with PTY for progress bars)
+- The `--host` flag on the laptop-side `tpi` binary is effectively unusable without prior web-UI login
+
+Default BMC host: `turingpi.local`. Set `BMC_HOST` in `bootstrap-config.kv` if mDNS is unreliable. A1 pins the BMC IP in `/etc/hosts` so subsequent runs do not depend on mDNS.

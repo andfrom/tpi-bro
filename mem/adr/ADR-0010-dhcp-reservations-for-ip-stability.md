@@ -52,10 +52,10 @@ The operator configures these bindings in their router once. After that, IPs are
 The MAC table printed by A4 looks like:
 ```
 DHCP reservation summary — configure in your router for stable IPs:
-  rk1-node1  MAC=dc:a6:32:xx:xx:xx  →  192.168.1.115
-  rk1-node2  MAC=dc:a6:32:xx:xx:xx  →  192.168.1.240
+  rk1-node1  MAC=xx:xx:xx:xx:xx:xx  →  <current DHCP IP>
+  rk1-node2  MAC=xx:xx:xx:xx:xx:xx  →  <current DHCP IP>
   ...
-  turingpi (BMC)  MAC=xx:xx:xx:xx:xx:xx  →  192.168.1.163
+  turingpi (BMC)  MAC=xx:xx:xx:xx:xx:xx  →  <current DHCP IP>
 ```
 
-Include the BMC in the DHCP reservation so `turingpi.local` in `/etc/hosts` stays accurate after router reboots.
+Include the BMC in the DHCP reservation so `turingpi.local` in `/etc/hosts` stays accurate after router reboots. Actual MACs and IPs are operator-specific and stored in `bootstrap-state.kv` (gitignored).
