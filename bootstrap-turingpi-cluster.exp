@@ -54,6 +54,14 @@ set STAGES {
 
 # ---------- utils ----------
 proc say {msg} { puts "\n==> $msg" }
+proc elapsed {secs} {
+  set h [expr {$secs / 3600}]
+  set m [expr {($secs % 3600) / 60}]
+  set s [expr {$secs % 60}]
+  if {$h > 0} { return "${h}h ${m}m ${s}s" }
+  if {$m > 0} { return "${m}m ${s}s" }
+  return "${s}s"
+}
 proc sh {cmd} { set f [open [list | bash -c $cmd 2>@1] r]; set out [read $f]; catch {close $f}; return $out }
 proc ask_secret {prompt} {
   catch {stty -echo}
@@ -724,8 +732,9 @@ proc stage_A3_flash_optional {dry stateRef} {
       say "Flashing $::NODE_COUNT nodes from BMC-local image…"
       for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
         say "  Node $i of $::NODE_COUNT…"
+        set _tn [clock seconds]
         tpi_flash_node $i "local"
-        say "  Node $i: done."
+        say "  Node $i: done. ([elapsed [expr {[clock seconds] - $_tn}]])"
       }
       say "A3: All nodes flashed."
     }
@@ -757,8 +766,9 @@ proc stage_A3_flash_optional {dry stateRef} {
       say "Flashing $::NODE_COUNT nodes (this may take several minutes per node)…"
       for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
         say "  Node $i of $::NODE_COUNT…"
+        set _tn [clock seconds]
         tpi_flash_node $i [flash_image_for $i]
-        say "  Node $i: done."
+        say "  Node $i: done. ([elapsed [expr {[clock seconds] - $_tn}]])"
       }
       say "A3: All nodes flashed."
     }
@@ -797,8 +807,9 @@ proc stage_A3_flash_optional {dry stateRef} {
         set type [image_type_for $i]
         set path [dict get $type_to_path $type]
         say "  Node $i of $::NODE_COUNT (type=$type)…"
+        set _tn [clock seconds]
         tpi_flash_node $i $path
-        say "  Node $i: done."
+        say "  Node $i: done. ([elapsed [expr {[clock seconds] - $_tn}]])"
       }
       say "A3: All nodes flashed."
     }
@@ -904,11 +915,12 @@ proc stage_A3_flash_optional {dry stateRef} {
         set need_dl 1
         lassign [bmc_cmd "test -f [list $dest_dl] && echo exists || echo missing"] _rc4 dl_chk
         if {[string match "*exists*" $dl_chk]} {
-          say "  BMC cache hit: [file tail $dest_dl] — verifying SHA256 (may take a minute)…"
+          say "  BMC cache hit: [file tail $dest_dl] — verifying SHA256…"
+          set _tv [clock seconds]
           lassign [bmc_cmd "sha256sum [list $dest_dl]" 300] _rc5 sum_out
           set actual [string tolower [string trim [lindex [split $sum_out " "] 0]]]
           if {$actual eq $expected} {
-            say "  SHA256 OK"; set need_dl 0
+            say "  SHA256 OK ([elapsed [expr {[clock seconds] - $_tv}]])"; set need_dl 0
           } else {
             say "  SHA256 mismatch — re-downloading (cached: $actual, expected: $expected)"
             bmc_cmd "rm -f [list $dest_dl]"
@@ -917,32 +929,34 @@ proc stage_A3_flash_optional {dry stateRef} {
 
         if {$need_dl} {
           say "  BMC downloading (type=$type): $url"
-          say "  (downloading on BMC — may take several minutes)"
+          set _td [clock seconds]
           lassign [bmc_stream "curl -fL --progress-bar -o [list $dest_dl] [list $url] 2>&1" 3600] dl_rc _dl_out
           if {$dl_rc != 0} {
             bmc_cmd "rm -f [list $dest_dl]"
             die "BMC download failed for type '$type' (exit $dl_rc)"
           }
-          say "  Verifying SHA256 on BMC (may take a minute on large images)…"
+          say "  Downloaded in [elapsed [expr {[clock seconds] - $_td}]]."
+          say "  Verifying SHA256 on BMC…"
+          set _tv [clock seconds]
           lassign [bmc_cmd "sha256sum [list $dest_dl]" 300] _rc6 sum_out2
           set actual [string tolower [string trim [lindex [split $sum_out2 " "] 0]]]
           if {$actual ne $expected} {
             bmc_cmd "rm -f [list $dest_dl]"
             die "SHA256 mismatch after BMC download for type '$type' — file deleted.\n  got:      $actual\n  expected: $expected\nThis may indicate a corrupted download. Do not proceed."
           }
-          say "  SHA256 OK"
+          say "  SHA256 OK ([elapsed [expr {[clock seconds] - $_tv}]])"
         }
 
         # Decompress .xz → .img (tpi flash cannot handle compressed images in RAM)
         if {$is_xz} {
-          say "  Decompressing on BMC: [file tail $dest_dl] → [file tail $dest_img]"
-          say "  (may take several minutes; .xz deleted afterwards to reclaim space)"
+          say "  Decompressing on BMC: [file tail $dest_dl] → [file tail $dest_img] (.xz deleted after)"
+          set _txz [clock seconds]
           lassign [bmc_stream "xzcat [list $dest_dl] > [list $dest_img] && rm -f [list $dest_dl] && echo ok || echo fail" 3600] _rxz rxz_out
           if {![string match "*ok*" $rxz_out]} {
             bmc_cmd "rm -f [list $dest_img] [list $dest_dl]"
             die "Decompression failed for type '$type'"
           }
-          say "  Decompression complete."
+          say "  Decompression complete. ([elapsed [expr {[clock seconds] - $_txz}]])"
         }
 
         dict set type_to_path $type $dest_img
@@ -954,8 +968,9 @@ proc stage_A3_flash_optional {dry stateRef} {
         set type [image_type_for $i]
         set path [dict get $type_to_path $type]
         say "  Node $i of $::NODE_COUNT (type=$type)…"
+        set _tn [clock seconds]
         tpi_flash_node_bmc $i $path
-        say "  Node $i: done."
+        say "  Node $i: done. ([elapsed [expr {[clock seconds] - $_tn}]])"
       }
       say "A3: All nodes flashed via BMC."
     }
@@ -1260,16 +1275,20 @@ if {$BMC_HOST eq "" && [dict exists $state "bmc_ip"]} {
   set BMC_HOST [dict get $state "bmc_ip"]
   say "Restored BMC host from state: $BMC_HOST"
 }
+set _t0 [clock seconds]
+
 if {$rediscover} {
+  set _tr [clock seconds]
   do_rediscover $dryrun state
   if {!$dryrun} { kv_save $STATE_FILE $state }
-  say "Done."
+  say "Done. ([elapsed [expr {[clock seconds] - $_tr}]])"
   exit 0
 }
 
 for {set idx $startIdx} {$idx <= $endIdx} {incr idx} {
   set s [lindex $STAGES $idx]
   say "Stage $s"
+  set _ts [clock seconds]
   switch -- $s {
     "A0_bmc_firmware"             { stage_A0_bmc_firmware            $dryrun state }
     "A1_find_bmc"                 { stage_A1_find_bmc                $dryrun state }
@@ -1281,6 +1300,7 @@ for {set idx $startIdx} {$idx <= $endIdx} {incr idx} {
     "A7_ephemeral_registry_phaseA" { stage_A7_ephemeral_registry_phaseA $dryrun state }
     default { say "  (unimplemented stage placeholder)" }
   }
+  say "  ↳ $s: [elapsed [expr {[clock seconds] - $_ts}]] (total [elapsed [expr {[clock seconds] - $_t0}]])"
   if {!$dryrun} { kv_save $STATE_FILE $state }
 }
-say "Done."
+say "Done. Total: [elapsed [expr {[clock seconds] - $_t0}]]"
