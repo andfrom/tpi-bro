@@ -366,29 +366,38 @@ proc bmc_cmd {cmd {timeout_s 30}} {
 proc bmc_stream {cmd timeout_s} {
   set bmc $::BMC_HOST
   if {$bmc eq ""} { die "BMC host not known. Run A1 first or set BMC_HOST in config." }
+  set output ""
   spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=5 -o BatchMode=no $::BMC_USER@$bmc $cmd
+  log_user 0
   set timeout $timeout_s
   expect {
     -re "(P|p)assword:" {
       if {$::BMC_PASS ne ""} { send "$::BMC_PASS\r"; exp_continue } \
       else { send "\r"; exp_continue }
     }
-    -re {.+} { puts -nonewline $expect_out(0,string); flush stdout; exp_continue }
-    timeout { die "BMC command timed out after ${timeout_s}s: $cmd" }
+    -re {.+} {
+      set chunk $expect_out(0,string)
+      append output $chunk
+      puts -nonewline $chunk
+      flush stdout
+      exp_continue
+    }
+    timeout { log_user 1; die "BMC command timed out after ${timeout_s}s: $cmd" }
     eof {}
   }
+  log_user 1
   lassign [wait] pid spawnid os_err exit_code
-  return $exit_code
+  return [list $exit_code $output]
 }
 
 # Flash a single node via tpi using an image path on the BMC's own filesystem.
 proc tpi_flash_node_bmc {node_idx bmc_path} {
   # Run tpi directly on the BMC — no --host or credentials needed when running locally on the BMC
   say "  BMC: tpi flash -n $node_idx --local --image-path $bmc_path"
-  set rc [bmc_stream "tpi flash -n $node_idx --local --image-path [list $bmc_path]" 1800]
-  if {$rc != 0} {
-    die "tpi flash node $node_idx (bmc) failed (exit $rc)"
+  lassign [bmc_stream "tpi flash -n $node_idx --local --image-path [list $bmc_path]" 1800] rc output
+  if {$rc != 0 || [string match "*Error occured*" $output]} {
+    die "tpi flash node $node_idx (bmc) failed: [string trim $output]"
   }
 }
 
@@ -889,7 +898,7 @@ proc stage_A3_flash_optional {dry stateRef} {
         say "  BMC downloading (type=$type): $url"
         say "  (downloading on BMC — may take several minutes for large images)"
         # curl -fL: follow redirects, fail on HTTP errors; redirect progress to stdout for visibility
-        set dl_rc [bmc_stream "curl -fL --progress-bar -o [list $dest] [list $url] 2>&1" 3600]
+        lassign [bmc_stream "curl -fL --progress-bar -o [list $dest] [list $url] 2>&1" 3600] dl_rc _dl_out
         if {$dl_rc != 0} {
           bmc_cmd "rm -f [list $dest]"
           die "BMC download failed for type '$type' (exit $dl_rc)"
