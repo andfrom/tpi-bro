@@ -69,9 +69,8 @@ node_ssh sudo update-ca-certificates
 # ---- write containerd mirror config -----------------------------------------
 
 say "Writing /etc/rancher/k3s/registries.yaml on ${NODE_IP}…"
+node_ssh sudo mkdir -p /etc/rancher/k3s
 
-# Escape the address for use as a YAML key (no special chars to worry about,
-# but quoting it defensively).
 REG_ADDR="$REGISTRY_ADDR"
 
 node_ssh sudo tee /etc/rancher/k3s/registries.yaml > /dev/null <<EOF
