@@ -821,10 +821,15 @@ proc stage_A3_flash_optional {dry stateRef} {
           if {![dict exists $manifest $type]} {
             die "Unknown image type '$type' for node $i. Available: [join [dict keys $manifest] {, }]"
           }
-          set url   [dict get $manifest $type url]
-          set fname [file tail $url]
-          set dest  "$::BMC_IMAGE_DIR/$fname"
-          say "DRY: node $i (type=$type): BMC curl/cache → $dest, SHA256 verify, tpi flash -n $i --local --image-path $dest"
+          set url      [dict get $manifest $type url]
+          set fname    [file tail $url]
+          set dest_dl  "$::BMC_IMAGE_DIR/$fname"
+          set dest_img [expr {[string match "*.xz" $fname] ? [file rootname $dest_dl] : $dest_dl}]
+          if {[string match "*.xz" $fname]} {
+            say "DRY: node $i (type=$type): BMC curl/cache → $dest_dl, SHA256 verify, xzcat → $dest_img, tpi flash -n $i --local --image-path $dest_img"
+          } else {
+            say "DRY: node $i (type=$type): BMC curl/cache → $dest_dl, SHA256 verify, tpi flash -n $i --local --image-path $dest_dl"
+          }
         }
         return
       }
@@ -866,7 +871,9 @@ proc stage_A3_flash_optional {dry stateRef} {
         die "Failed to create image directory $::BMC_IMAGE_DIR on BMC: $mkdir_out"
       }
 
-      # Download each distinct image type (curl on BMC, with local cache check + SHA256 verify)
+      # Download and prepare each distinct image type.
+      # .xz images are decompressed to .img on the BMC (tpi flash can't decompress in RAM).
+      # The .xz is deleted after decompression to reclaim space.
       set type_to_path [dict create]
       for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
         set type [image_type_for $i]
@@ -878,41 +885,67 @@ proc stage_A3_flash_optional {dry stateRef} {
         set url      [dict get $entry url]
         set expected [string tolower [string trim [dict get $entry sha256]]]
         set fname    [file tail $url]
-        set dest     "$::BMC_IMAGE_DIR/$fname"
+        set dest_dl  "$::BMC_IMAGE_DIR/$fname"
+        set is_xz    [string match "*.xz" $fname]
+        set dest_img [expr {$is_xz ? [file rootname $dest_dl] : $dest_dl}]
 
-        # Check if already cached on BMC with correct SHA256
-        lassign [bmc_cmd "test -f [list $dest] && echo exists || echo missing"] _rc4 exists_out
-        if {[string match "*exists*" $exists_out]} {
-          say "  BMC cache hit: $dest — verifying SHA256 (may take a minute)…"
-          lassign [bmc_cmd "sha256sum [list $dest]" 300] _rc5 sum_out
-          set actual [string tolower [string trim [lindex [split $sum_out " "] 0]]]
-          if {$actual eq $expected} {
-            say "  SHA256 OK"
-            dict set type_to_path $type $dest
+        # If a pre-decompressed .img already exists, use it directly — no SHA256 check
+        # since it was produced from a previously verified .xz.
+        if {$is_xz} {
+          lassign [bmc_cmd "test -f [list $dest_img] && echo exists || echo missing"] _rc img_chk
+          if {[string match "*exists*" $img_chk]} {
+            say "  BMC: raw image already present: [file tail $dest_img]"
+            dict set type_to_path $type $dest_img
             continue
           }
-          say "  SHA256 mismatch — re-downloading (cached: $actual, expected: $expected)"
-          bmc_cmd "rm -f [list $dest]"
         }
 
-        say "  BMC downloading (type=$type): $url"
-        say "  (downloading on BMC — may take several minutes for large images)"
-        # curl -fL: follow redirects, fail on HTTP errors; redirect progress to stdout for visibility
-        lassign [bmc_stream "curl -fL --progress-bar -o [list $dest] [list $url] 2>&1" 3600] dl_rc _dl_out
-        if {$dl_rc != 0} {
-          bmc_cmd "rm -f [list $dest]"
-          die "BMC download failed for type '$type' (exit $dl_rc)"
+        # Ensure the downloaded (.xz or raw) file is cached and SHA256-verified
+        set need_dl 1
+        lassign [bmc_cmd "test -f [list $dest_dl] && echo exists || echo missing"] _rc4 dl_chk
+        if {[string match "*exists*" $dl_chk]} {
+          say "  BMC cache hit: [file tail $dest_dl] — verifying SHA256 (may take a minute)…"
+          lassign [bmc_cmd "sha256sum [list $dest_dl]" 300] _rc5 sum_out
+          set actual [string tolower [string trim [lindex [split $sum_out " "] 0]]]
+          if {$actual eq $expected} {
+            say "  SHA256 OK"; set need_dl 0
+          } else {
+            say "  SHA256 mismatch — re-downloading (cached: $actual, expected: $expected)"
+            bmc_cmd "rm -f [list $dest_dl]"
+          }
         }
 
-        say "  Verifying SHA256 on BMC (may take a minute on large images)…"
-        lassign [bmc_cmd "sha256sum [list $dest]" 300] _rc6 sum_out2
-        set actual [string tolower [string trim [lindex [split $sum_out2 " "] 0]]]
-        if {$actual ne $expected} {
-          bmc_cmd "rm -f [list $dest]"
-          die "SHA256 mismatch after BMC download for type '$type' — file deleted.\n  got:      $actual\n  expected: $expected\nThis may indicate a corrupted download. Do not proceed."
+        if {$need_dl} {
+          say "  BMC downloading (type=$type): $url"
+          say "  (downloading on BMC — may take several minutes)"
+          lassign [bmc_stream "curl -fL --progress-bar -o [list $dest_dl] [list $url] 2>&1" 3600] dl_rc _dl_out
+          if {$dl_rc != 0} {
+            bmc_cmd "rm -f [list $dest_dl]"
+            die "BMC download failed for type '$type' (exit $dl_rc)"
+          }
+          say "  Verifying SHA256 on BMC (may take a minute on large images)…"
+          lassign [bmc_cmd "sha256sum [list $dest_dl]" 300] _rc6 sum_out2
+          set actual [string tolower [string trim [lindex [split $sum_out2 " "] 0]]]
+          if {$actual ne $expected} {
+            bmc_cmd "rm -f [list $dest_dl]"
+            die "SHA256 mismatch after BMC download for type '$type' — file deleted.\n  got:      $actual\n  expected: $expected\nThis may indicate a corrupted download. Do not proceed."
+          }
+          say "  SHA256 OK"
         }
-        say "  SHA256 OK"
-        dict set type_to_path $type $dest
+
+        # Decompress .xz → .img (tpi flash cannot handle compressed images in RAM)
+        if {$is_xz} {
+          say "  Decompressing on BMC: [file tail $dest_dl] → [file tail $dest_img]"
+          say "  (may take several minutes; .xz deleted afterwards to reclaim space)"
+          lassign [bmc_stream "xzcat [list $dest_dl] > [list $dest_img] && rm -f [list $dest_dl] && echo ok || echo fail" 3600] _rxz rxz_out
+          if {![string match "*ok*" $rxz_out]} {
+            bmc_cmd "rm -f [list $dest_img] [list $dest_dl]"
+            die "Decompression failed for type '$type'"
+          }
+          say "  Decompression complete."
+        }
+
+        dict set type_to_path $type $dest_img
       }
 
       # Flash each node using the BMC-local image path
