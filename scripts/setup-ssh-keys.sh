@@ -27,7 +27,7 @@ done
 
 # ---- helpers ----------------------------------------------------------------
 
-kv_get() { grep -E "^${1}=" "$2" 2>/dev/null | head -1 | cut -d= -f2-; }
+kv_get() { grep -E "^${1}=" "$2" 2>/dev/null | head -1 | cut -d= -f2- || true; }
 say()  { echo "==> $*"; }
 info() { echo "    $*"; }
 err()  { echo "ERROR: $*" >&2; exit 1; }

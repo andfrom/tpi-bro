@@ -24,7 +24,7 @@ done
 
 # ---- helpers ----------------------------------------------------------------
 
-kv_get() { grep -E "^${1}=" "$2" 2>/dev/null | head -1 | cut -d= -f2-; }
+kv_get() { grep -E "^${1}=" "$2" 2>/dev/null | head -1 | cut -d= -f2- || true; }
 ip_add()  { local p="${1%.*}" l="${1##*.}"; echo "${p}.$((l + $2))"; }
 say()     { echo "==> $*"; }
 info()    { echo "    $*"; }

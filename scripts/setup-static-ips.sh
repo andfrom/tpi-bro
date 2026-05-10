@@ -37,7 +37,7 @@ done
 
 # ---- helpers ----------------------------------------------------------------
 
-kv_get() { grep -E "^${1}=" "$2" 2>/dev/null | head -1 | cut -d= -f2-; }
+kv_get() { grep -E "^${1}=" "$2" 2>/dev/null | head -1 | cut -d= -f2- || true; }
 kv_set() {
   local key="$1" val="$2" file="$3"
   if grep -q "^${key}=" "$file" 2>/dev/null; then
