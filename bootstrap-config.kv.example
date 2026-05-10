@@ -4,6 +4,13 @@
 
 # ---------- Network ----------
 SUBNET=192.168.1.0/24
+# Base IP for the TuringPi cluster block.
+# BMC gets this address; node N gets base+N (e.g. base=.10 → node1=.11 … node4=.14).
+# Pick a range below your router's DHCP pool start so there's no conflict.
+TPI_BASE_IP_ADDR=
+GATEWAY=
+# Space-separated DNS servers
+DNS_SERVERS=
 
 # ---------- Nodes ----------
 NODE_COUNT=4

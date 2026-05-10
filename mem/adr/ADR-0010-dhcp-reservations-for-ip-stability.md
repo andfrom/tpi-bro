@@ -1,6 +1,6 @@
-# ADR-0010: Static DHCP Reservations for Node IP Stability
+# ADR-0010: Static IPs for Node IP Stability
 
-**Status:** Accepted  
+**Status:** Accepted (updated 2026-05-10 — DHCP reservation approach superseded)  
 **Date:** 2026-05-09
 
 ## Context
@@ -20,42 +20,46 @@ Three approaches were considered for handling IP drift:
 
 ## Decision
 
-**Primary recommendation: static DHCP reservations in the router.** This is the only approach that prevents drift entirely without relying on scripts.
+**Implemented: static IPs configured on each node via netplan.**
 
-The bootstrap script supports this by:
-- Extracting each node's MAC address from the laptop's ARP table after SSH discovery in A4
-- Extracting the BMC MAC address in A1
-- Printing a DHCP reservation table at the end of A4 with all MACs and suggested IPs
-- Storing MACs in `bootstrap-state.kv` for future reference
+The router in use (Icotera i4882-73) does not expose a DHCP reservation UI. Static DHCP reservations are therefore not possible on this network.
 
-The operator configures these bindings in their router once. After that, IPs are stable across every power cycle.
+IP assignment scheme (configured via `TPI_BASE_IP_ADDR` in `bootstrap-config.kv`):
+| Host       | IP                      |
+|------------|-------------------------|
+| BMC        | TPI_BASE_IP_ADDR        |
+| rk1-node1  | TPI_BASE_IP_ADDR + 1    |
+| rk1-node2  | TPI_BASE_IP_ADDR + 2    |
+| rk1-node3  | TPI_BASE_IP_ADDR + 3    |
+| rk1-node4  | TPI_BASE_IP_ADDR + 4    |
 
-**Fallback: `--rediscover` mode.** For networks where the operator does not control the DHCP server (managed office WiFi, guest networks), the bootstrap script's `--rediscover` flag scans the subnet and identifies nodes by their SSH hostname. It updates both the state file and `/etc/hosts` with the current IPs. No power cycling, no password changes required.
+Pick a base address below the router's DHCP pool start so there is no conflict. Actual IPs are operator-specific and not committed to the repo.
+
+`setup-static-ips.sh` automates the netplan configuration across all 4 nodes. It writes `/etc/netplan/99-static.yaml` (priority 99 overrides cloud-init's default DHCP config), applies it, verifies connectivity at the new IP, and updates `bootstrap-state.kv` and `/etc/hosts`.
+
+The BMC IP is left as DHCP. The TuringPi 2 BMC runs BusyBox armv7l and does not expose IP configuration through its web UI. The BMC IP is only needed for Phase A power control; Phase B uses only node IPs. If the BMC IP drifts, `turingpi.local` (mDNS) or a quick `nmap` scan will locate it, and `bootstrap-state.kv` can be updated manually.
+
+**Fallback: `--rediscover` mode.** For ad-hoc situations where IPs drift (e.g., re-flash without running `setup-static-ips.sh`), the bootstrap script's `--rediscover` flag scans the subnet and identifies nodes by SSH hostname, then updates the state file and `/etc/hosts`.
 
 ## Consequences
 
-**Positive (reservations):**
-- IPs are stable forever — no script intervention needed after initial setup
-- `kubectl`, SSH, and image push all work reliably after power cycles
-- Teardown + re-bootstrap always produces consistent IPs
-
-**Positive (`--rediscover` fallback):**
-- Works on any network including those without operator access to the DHCP server
-- Identifies nodes by identity (SSH hostname), not by stored IP — correct even if all IPs changed simultaneously
+**Positive:**
+- IPs are stable across power cycles once netplan config is applied
+- `kubectl`, SSH, and image push all work reliably
+- Memorable scheme (.10 = BMC, .11–.14 = nodes 1–4)
+- `setup-static-ips.sh` is fully automated — runs once after Phase A
 
 **Negative:**
-- DHCP reservation setup is a manual operator step (router UI — not scriptable in a portable way)
-- `--rediscover` requires nodes to be powered on and SSH-accessible; does not help if nodes are powered off
+- Netplan config is lost on OS re-flash; `setup-static-ips.sh` must be re-run after any re-flash
+- DHCP reservation approach (the original design) would have survived re-flash automatically — not available on this router
 
 ## Notes
 
-The MAC table printed by A4 looks like:
-```
-DHCP reservation summary — configure in your router for stable IPs:
-  rk1-node1  MAC=xx:xx:xx:xx:xx:xx  →  <current DHCP IP>
-  rk1-node2  MAC=xx:xx:xx:xx:xx:xx  →  <current DHCP IP>
-  ...
-  turingpi (BMC)  MAC=xx:xx:xx:xx:xx:xx  →  <current DHCP IP>
-```
+A4 still prints a MAC/IP table (originally intended for router DHCP reservation entry). On this network it serves as a record of each node's MAC address, stored in `bootstrap-state.kv` (gitignored).
 
-Include the BMC in the DHCP reservation so `turingpi.local` in `/etc/hosts` stays accurate after router reboots. Actual MACs and IPs are operator-specific and stored in `bootstrap-state.kv` (gitignored).
+After any re-flash cycle, the sequence is:
+1. Run Phase A bootstrap (A1–A7) — nodes get fresh DHCP IPs
+2. Run `setup-static-ips.sh` — configures static IPs and updates state file
+3. Continue with Phase B
+
+`setup-static-ips.sh` and the BMC web UI step are documented in the Phase B0 section of `TODO.md`.

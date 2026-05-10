@@ -6,11 +6,13 @@ There are a few buckets of work: [Phase B–D implementation](#phase-b-k3s--pers
 
 ## Phase B — k3s + Persistent Registry
 
-**Prerequisite:** Configure DHCP reservations in the router for all 4 nodes (MACs in `bootstrap-state.kv`) before any Phase B work. All k3s TLS SANs and registry cert SANs must use stable IPs.
+**Prerequisite:** All 4 nodes and the BMC must have stable IPs before any Phase B work. All k3s TLS SANs and registry cert SANs are baked into certs at install time — IP changes later require re-issuing certs.
+
+Static IP scheme: BMC=TPI_BASE_IP_ADDR, node N=base+N. Configure TPI_BASE_IP_ADDR, GATEWAY, DNS_SERVERS in bootstrap-config.kv.
 
 ### B0 — Pre-flight
 
-- [ ] Configure DHCP reservations for all 4 nodes and BMC
+- [ ] Run `./setup-static-ips.sh` — configures netplan on all 4 nodes and updates `bootstrap-state.kv` + `/etc/hosts`
 - [ ] Set up SSH key-based auth on all nodes + passwordless `sudo` — eliminates the need for Expect wrappers in Phase B+ scripts; the full `make`-based automation depends on this
 - [ ] Create `bootstrap.env` (see template below) as the single config source for all Phase B scripts
 - [ ] Create `bootstrap.env.example` (committed) documenting all vars; add `bootstrap.env` to `.gitignore`
@@ -18,13 +20,13 @@ There are a few buckets of work: [Phase B–D implementation](#phase-b-k3s--pers
 **`bootstrap.env` variables to document:**
 ```
 K3S_SERVER_HOST=rk1-node1
-K3S_SERVER_IP=<static IP after DHCP reservation>
+K3S_SERVER_IP=<TPI_BASE_IP_ADDR+1>
 RK1_NODES=(rk1-node1 rk1-node2 rk1-node3 rk1-node4)
 SSH_USER=ubuntu
 SSH_PASS=          # blank = use SSH keys
 API_SAN_1=rk1-node1
-API_SAN_2=<node1 static IP>
-REG_HOST_IP=<node1 static IP>   # switch to MetalLB VIP when available
+API_SAN_2=<TPI_BASE_IP_ADDR+1>
+REG_HOST_IP=<TPI_BASE_IP_ADDR+1>   # switch to MetalLB VIP when available
 REG_PORT=5000
 REG_ADDR=<REG_HOST_IP>:<REG_PORT>
 REG_USERNAME=push
