@@ -572,6 +572,42 @@ kubectl -n registry create secret generic registry-htpasswd \
 docker login https://<REG_ADDR>:5000
 ```
 
+### Recommended migration order: TLS first, then auth
+
+Enable TLS and verify end-to-end trust before adding auth. Chasing a TLS failure
+and an auth failure simultaneously is confusing. Sequence:
+
+1. Deploy registry with `tls.enabled: true`, `auth.enabled: false`
+2. Confirm `curl https://<REG_ADDR>:5000/v2/` returns 200 (no creds needed)
+3. Flip `auth.enabled: true`
+4. Confirm `curl` returns 401; `docker login` succeeds; `docker push` works
+
+### Registry delete API is disabled by default
+
+`registry:2` does not allow image deletion unless explicitly enabled.
+
+**Fix:** Add to `registry.extraEnv` in `values.yaml`:
+```yaml
+registry:
+  extraEnv:
+    - name: REGISTRY_STORAGE_DELETE_ENABLED
+      value: "true"
+```
+Then restart the registry pod.
+
+### Creating TLS/auth secrets outside Helm (recommended)
+
+Create Kubernetes secrets with `kubectl` directly so credentials never appear in
+chart values or git. Reference them by name in `values.yaml`:
+```bash
+kubectl -n registry create secret tls registry-tls \
+  --cert=registry-certs/registry.crt --key=registry-certs/registry.key
+kubectl -n registry create secret generic registry-htpasswd \
+  --from-file=htpasswd=./htpasswd
+```
+Keep secret names consistent with the chart's `values.yaml` (`tls.secretName`,
+`auth.secretName`).
+
 ---
 
 ## 14. Expect script / bootstrap automation

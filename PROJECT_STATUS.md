@@ -37,12 +37,23 @@ tpi-bro bootstraps a TuringPi 2 board (4× RK1 ARM64 compute modules) from bare 
 
 **Overall: NOT STARTED**
 
-- k3s install on node1 (server): not started
-- k3s install on nodes 2–4 (workers): not started
-- containerd registry mirror config: not started
-- Persistent registry via Helm (`registry-chart/` exists, not deployed): not started
-- CA cert generation + distribution: `gen-registry-certs.sh` exists, not run
-- End-to-end push/pull test: not done
+Phase B is entirely Helm/GitOps — **no Expect stages**. The Expect script's job ends at A7. See `TODO.md` for the full task breakdown and script designs.
+
+| Step | What | Status |
+|------|------|--------|
+| B0-dhcp | DHCP reservations in router (prerequisite for stable SANs) | Not done |
+| B0-ssh | SSH key auth + passwordless sudo on all nodes | Not done |
+| B0-env | `bootstrap.env` single config source | Not done |
+| B1-k3s | k3s server on node1 (`--tls-san` required) + agent on nodes 2–4 | Not started |
+| B1-kubeconfig | `prep-kubeconfig-local.sh` — laptop kubectl access | Not started |
+| B2-certs | `gen-registry-certs.sh` (multi-SAN: hostname + static IP + future MetalLB VIP) | Script exists (partial); not run |
+| B2-storage | Persistent volume for registry data | Not started |
+| B2-registry | Upgrade to TLS+auth via `registry-chart/` Helm chart | Chart exists; not deployed |
+| B2-ca | `install-ca.sh` — distribute CA cert to all nodes + containerd mirror config | Not started |
+| B2-verify | End-to-end `docker login` + push + k3s pull smoke test | Not done |
+| B3-makefile | `Makefile` orchestrating all Phase B steps | Not started |
+| B4-gitops | Argo CD or Flux install + platform repo structure | Not started |
+| B5-metallb | MetalLB for stable registry VIP (replaces DHCP reservation) | Not started |
 
 ---
 
