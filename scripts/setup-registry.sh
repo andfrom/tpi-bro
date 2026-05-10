@@ -168,12 +168,20 @@ stage_ca_distribute() {
 # ---- stage: laptop-docker-trust ---------------------------------------------
 
 stage_laptop_docker_trust() {
-  echo
-  say "Laptop Docker trust — run these commands on your laptop:"
-  echo "   sudo mkdir -p /etc/docker/certs.d/${REGISTRY_ADDR}"
-  echo "   sudo cp ${CERT_DIR}/myCA.crt /etc/docker/certs.d/${REGISTRY_ADDR}/ca.crt"
-  echo "   sudo systemctl restart docker"
-  echo
+  say "Installing CA trust on laptop Docker…"
+  local cert_dir="/etc/docker/certs.d/${REGISTRY_ADDR}"
+  local src="${CERT_DIR}/myCA.crt"
+  local dst="${cert_dir}/ca.crt"
+
+  if [[ -f "$dst" ]] && diff -q "$src" "$dst" &>/dev/null; then
+    info "CA already installed at ${dst} — skipping Docker restart."
+    return 0
+  fi
+
+  sudo mkdir -p "$cert_dir"
+  sudo cp "$src" "$dst"
+  sudo systemctl restart docker
+  info "Done."
 }
 
 # ---- stage: verify ----------------------------------------------------------
