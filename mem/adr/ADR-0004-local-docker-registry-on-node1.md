@@ -33,4 +33,4 @@ Phase A requires a registry that can receive pushed images before k3s is install
 
 ## Notes
 
-SAN for the TLS cert must include `rk1-node1` hostname and `192.168.1.115` IP (known from `gen-registry-certs.sh`).
+SAN for the TLS cert must include `rk1-node1` hostname and the node's static IP (set via `REG_HOST_IP` in `gen-registry-certs.sh`; configure DHCP reservation first so the IP is stable).

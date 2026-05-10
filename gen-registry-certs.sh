@@ -7,7 +7,7 @@ OUT_DIR="/home/$USER/Apps/registry-certs"
 REG_SAN_DNS=("rk1-node1")
 # REG_SAN_DNS=("rk1-node1" "registry.home")
 # All IPs clients might use for the registry (node IP, MetalLB VIP, etc.):
-REG_SAN_IP=("192.168.1.115" "192.168.1.50")
+REG_SAN_IP=("<node1-ip>")  # add MetalLB VIP here too when available
 DAYS_CA=3650      # 10 years for CA
 DAYS_SRV=825      # ~27 months for server cert
 # ================
@@ -91,7 +91,7 @@ echo "4) Install CA on each node + containerd config (see install-ca.sh helper).
 
 # # === Edit these to match your setup ===
 # REG_HOST_DNS="rk1-node1"     # optional DNS name you might use (can be rk1-node1)
-# REG_HOST_IP="192.168.1.115"  # the IP clients will use to reach the docker registry
+# REG_HOST_IP="<node1-ip>"     # the IP clients will use to reach the docker registry
 # OUT_DIR="./registry-certs"   # where to place outputs
 # DAYS_CA=3650                 # 10 years
 # DAYS_SRV=825                 # ~27 months

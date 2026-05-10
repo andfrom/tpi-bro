@@ -323,7 +323,7 @@ IDENTIFICATION HAS CHANGED".
 **Fix:**
 ```bash
 ssh-keygen -R rk1-node1
-ssh-keygen -R 192.168.1.115
+ssh-keygen -R <node-ip>
 ```
 The bootstrap script uses `-o StrictHostKeyChecking=no -o
 UserKnownHostsFile=/dev/null` for all automated node SSH connections.
@@ -381,7 +381,7 @@ http: server gave HTTP response to HTTPS client`
 ```json
 {
   "insecure-registries": [
-    "192.168.1.115:5000",
+    "<node1-ip>:5000",
     "rk1-node1:5000"
   ]
 }
@@ -447,7 +447,7 @@ registry node IP in `REG_HOST_IP`.
 
 **Fix:** `REG_HOST_DNS` and `REG_HOST_IP` in `gen-registry-certs.sh` must
 identify the machine *running* the registry (e.g., `rk1-node1` /
-`192.168.1.115`), not the laptop. Include both hostname and IP forms in the SAN
+`<node1-ip>`), not the laptop. Include both hostname and IP forms in the SAN
 list.
 
 ### When changing registry IP, regenerate the cert
@@ -491,7 +491,7 @@ curl -sfL https://get.k3s.io | \
   INSTALL_K3S_EXEC="--node-name rk1-node1 \
     --write-kubeconfig-mode 644 \
     --tls-san rk1-node1 \
-    --tls-san 192.168.1.115" \
+    --tls-san <node1-ip>" \
   sh -
 ```
 If already installed without these, reinstall (k3s install is idempotent; state
@@ -536,7 +536,7 @@ Every machine that pushes or pulls during Phase A needs:
 **Docker clients** — `/etc/docker/daemon.json`:
 ```json
 {
-  "insecure-registries": ["192.168.1.115:5000", "rk1-node1:5000"]
+  "insecure-registries": ["<node1-ip>:5000", "rk1-node1:5000"]
 }
 ```
 

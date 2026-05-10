@@ -267,11 +267,11 @@ DHCP does not guarantee stable IPs. After a power cycle or network interruption,
 
 ```
 DHCP reservation summary — configure in your router for stable IPs:
-  rk1-node1  MAC=dc:a6:32:xx:xx:xx  →  192.168.1.115
-  rk1-node2  MAC=dc:a6:32:xx:xx:xx  →  192.168.1.240
-  rk1-node3  MAC=dc:a6:32:xx:xx:xx  →  192.168.1.166
-  rk1-node4  MAC=dc:a6:32:xx:xx:xx  →  192.168.1.93
-  turingpi (BMC)  MAC=xx:xx:xx:xx:xx:xx  →  192.168.1.163
+  rk1-node1  MAC=xx:xx:xx:xx:xx:xx  →  <your-ip>
+  rk1-node2  MAC=xx:xx:xx:xx:xx:xx  →  <your-ip>
+  rk1-node3  MAC=xx:xx:xx:xx:xx:xx  →  <your-ip>
+  rk1-node4  MAC=xx:xx:xx:xx:xx:xx  →  <your-ip>
+  turingpi (BMC)  MAC=xx:xx:xx:xx:xx:xx  →  <your-ip>
 ```
 
 Enter these MAC→IP bindings in your router's DHCP reservation settings. Once done, IPs are stable across reboots and `--rediscover` is rarely needed.

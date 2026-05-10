@@ -45,7 +45,7 @@ STATE_FILE=./bootstrap-state.kv
 
 # ---------- BMC ----------
 # BMC_HOST=  (leave blank to auto-discover via nmap in A1)
-# BMC_HOST=192.168.1.163
+# BMC_HOST=
 
 # SSH credentials for BMC (used by --flash bmc to run curl on the BMC):
 # BMC_USER=root
