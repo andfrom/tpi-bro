@@ -88,8 +88,9 @@ EOF
 # ---- restart k3s or k3s-agent -----------------------------------------------
 
 say "Detecting k3s service type on ${NODE_IP}…"
-SVC=$(node_ssh "systemctl is-active k3s 2>/dev/null && echo k3s || \
-               (systemctl is-active k3s-agent 2>/dev/null && echo k3s-agent || echo none)")
+SVC=$(node_ssh "if systemctl is-active k3s &>/dev/null; then echo k3s; \
+               elif systemctl is-active k3s-agent &>/dev/null; then echo k3s-agent; \
+               else echo none; fi")
 
 case "$SVC" in
   k3s)
