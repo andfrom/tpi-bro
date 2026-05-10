@@ -75,6 +75,13 @@ proc ask_secret {prompt} {
   send_user "\n"
   return $val
 }
+proc ask_yn {prompt} {
+  send_user "$prompt \[y/N\] "
+  set ans ""
+  expect_user { -timeout -1; -re "(.*)\n" { set ans [string trim [string tolower $expect_out(1,string)]] } }
+  send_user "\n"
+  return [expr {$ans eq "y" || $ans eq "yes"}]
+}
 proc die {msg} { puts stderr "ERROR: $msg"; exit 1 }
 
 proc print_help {} {
@@ -898,6 +905,29 @@ proc stage_A3_flash_optional {dry stateRef} {
       lassign [bmc_cmd "mkdir -p $::BMC_IMAGE_DIR && echo ok || echo fail"] _rc4 mkdir_out
       if {![string match "*ok*" $mkdir_out]} {
         die "Failed to create image directory $::BMC_IMAGE_DIR on BMC: $mkdir_out"
+      }
+
+      # Offer to delete stale images that are not needed for this run.
+      # Decompressing a .xz requires ~5 GB free, so this matters.
+      set _needed_names [list]
+      for {set _ni 1} {$_ni <= $::NODE_COUNT} {incr _ni} {
+        set _nt [image_type_for $_ni]
+        if {[lsearch $_needed_names $_nt] >= 0} continue
+        if {![dict exists $manifest $_nt]} continue
+        set _nfname [file tail [dict get [dict get $manifest $_nt] url]]
+        lappend _needed_names $_nfname
+        if {[string match "*.xz" $_nfname]} { lappend _needed_names [file rootname $_nfname] }
+      }
+      lassign [bmc_cmd "ls -1 $::BMC_IMAGE_DIR 2>/dev/null || true"] _ _ls_raw
+      foreach _f [split [string trim $_ls_raw] "\n"] {
+        set _f [string trim $_f]
+        if {$_f eq "" || [lsearch $_needed_names $_f] >= 0} continue
+        lassign [bmc_cmd "du -sh [list $::BMC_IMAGE_DIR/$_f] 2>/dev/null" 10] _ _sz
+        set _sz [string trim [lindex [split $_sz] 0]]
+        if {[ask_yn "  Old image on BMC SD card: $_f ($_sz) — not needed for this run.\n  Decompression of the new image requires ~5 GB free. Delete?"]} {
+          bmc_cmd "rm -f [list $::BMC_IMAGE_DIR/$_f]"
+          say "  Deleted: $_f"
+        }
       }
 
       # Download and prepare each distinct image type.
