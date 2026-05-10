@@ -244,16 +244,17 @@ EOF
     -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null \
     -o ConnectTimeout=10 \
-    -tt "$NODE_USER@$cur_ip" \
-    "echo '$NODE_PASS' | sudo -S tee /etc/netplan/99-static.yaml >/dev/null <<'YAML'
+    "$NODE_USER@$cur_ip" \
+    "tee /tmp/99-static.yaml >/dev/null <<'YAML'
 ${netplan_yaml}
 YAML
+echo '$NODE_PASS' | sudo -S mv /tmp/99-static.yaml /etc/netplan/99-static.yaml
 echo '$NODE_PASS' | sudo -S chmod 600 /etc/netplan/99-static.yaml
-nohup bash -c 'sleep 2 && sudo netplan apply' >/dev/null 2>&1 &
+echo '$NODE_PASS' | sudo -S systemd-run --no-block --unit=netplan-static-ip bash -c 'sleep 2 && netplan apply'
 echo NETPLAN_QUEUED" 2>/dev/null || true
 
-  info "netplan apply queued — waiting for $node at $new_ip (up to 60s)…"
-  if poll_ssh "$NODE_USER" "$NODE_PASS" "$new_ip" 60; then
+  info "netplan apply queued — waiting for $node at $new_ip (up to 120s)…"
+  if poll_ssh "$NODE_USER" "$NODE_PASS" "$new_ip" 120; then
     info "OK — $node is live at $new_ip"
     return 0
   else
