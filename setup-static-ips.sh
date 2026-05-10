@@ -9,7 +9,12 @@
 # Example: TPI_BASE_IP_ADDR=<your-base-ip>
 #   BMC=base, node1=base+1, node2=base+2, node3=base+3, node4=base+4
 #
-# Usage:  ./setup-static-ips.sh [--state FILE] [--config FILE] [--nodes-only] [--bmc-only]
+# Usage:
+#   ./setup-static-ips.sh                  # configure BMC + all nodes
+#   ./setup-static-ips.sh --nodes-only     # configure nodes only
+#   ./setup-static-ips.sh --bmc-only       # configure BMC only
+#   ./setup-static-ips.sh --verify         # reboot nodes + assert static IPs persist
+#   ./setup-static-ips.sh [--state FILE] [--config FILE]
 
 set -euo pipefail
 
@@ -17,6 +22,7 @@ STATE_FILE="./bootstrap-state.kv"
 CONFIG_FILE="./bootstrap-config.kv"
 DO_NODES=1
 DO_BMC=1
+DO_VERIFY=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -24,6 +30,7 @@ while [[ $# -gt 0 ]]; do
     --config)     CONFIG_FILE="$2"; shift 2 ;;
     --nodes-only) DO_BMC=0;         shift   ;;
     --bmc-only)   DO_NODES=0;       shift   ;;
+    --verify)     DO_VERIFY=1; DO_NODES=0; DO_BMC=0; shift ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
   esac
 done
@@ -263,7 +270,62 @@ echo NETPLAN_QUEUED" 2>/dev/null || true
   fi
 }
 
+# ---- verify (reboot + assert) -----------------------------------------------
+
+verify_nodes() {
+  say "Rebooting all nodes to verify static IP persistence…"
+
+  echo -n "Node password: "
+  read -rs NODE_PASS
+  echo
+  echo
+
+  # Issue reboots in parallel; ignore errors (session drops when node reboots)
+  for node in rk1-node1 rk1-node2 rk1-node3 rk1-node4; do
+    local new_ip="${NODE_NEW_IP[$node]}"
+    info "Rebooting $node ($new_ip)…"
+    sshpass -p "$NODE_PASS" ssh \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 \
+      "$NODE_USER@$new_ip" \
+      "echo '$NODE_PASS' | sudo -S reboot" 2>/dev/null || true &
+  done
+  wait
+  echo
+
+  info "Waiting 20s for nodes to go down…"
+  sleep 20
+
+  say "Polling for nodes at static IPs…"
+  local failed=()
+  for node in rk1-node1 rk1-node2 rk1-node3 rk1-node4; do
+    local new_ip="${NODE_NEW_IP[$node]}"
+    info "$node — polling $new_ip (up to 120s)…"
+    if poll_ssh "$NODE_USER" "$NODE_PASS" "$new_ip" 120; then
+      info "OK — $node is live at $new_ip after reboot"
+    else
+      echo "  FAIL: $node did not come back at $new_ip"
+      failed+=("$node")
+    fi
+  done
+
+  echo
+  if [[ ${#failed[@]} -eq 0 ]]; then
+    say "PASS — all nodes returned at their static IPs after reboot."
+  else
+    echo "FAIL: ${failed[*]} did not return at expected IPs."
+    echo "Check netplan config on each node: sudo cat /etc/netplan/99-static.yaml"
+    exit 1
+  fi
+}
+
 # ---- run --------------------------------------------------------------------
+
+if (( DO_VERIFY )); then
+  verify_nodes
+  exit 0
+fi
 
 FAILED=()
 
