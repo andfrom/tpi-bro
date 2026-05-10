@@ -257,6 +257,10 @@ ${netplan_yaml}
 YAML
 echo '$NODE_PASS' | sudo -S mv /tmp/99-static.yaml /etc/netplan/99-static.yaml
 echo '$NODE_PASS' | sudo -S chmod 600 /etc/netplan/99-static.yaml
+echo '$NODE_PASS' | sudo -S rm -f /etc/netplan/50-cloud-init.yaml
+printf 'network: {config: disabled}\n' > /tmp/99-disable-network.cfg
+echo '$NODE_PASS' | sudo -S mkdir -p /etc/cloud/cloud.cfg.d
+echo '$NODE_PASS' | sudo -S mv /tmp/99-disable-network.cfg /etc/cloud/cloud.cfg.d/99-disable-network.cfg
 echo '$NODE_PASS' | sudo -S systemd-run --no-block --unit=netplan-static-ip bash -c 'sleep 2 && netplan apply'
 echo NETPLAN_QUEUED" 2>/dev/null || true
 
@@ -297,18 +301,35 @@ verify_nodes() {
   info "Waiting 20s for nodes to go down…"
   sleep 20
 
-  say "Polling for nodes at static IPs…"
+  say "Polling all nodes in parallel…"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+
+  for node in rk1-node1 rk1-node2 rk1-node3 rk1-node4; do
+    local new_ip="${NODE_NEW_IP[$node]}"
+    (
+      if poll_ssh "$NODE_USER" "$NODE_PASS" "$new_ip" 120; then
+        echo "OK" > "$tmpdir/$node"
+      else
+        echo "FAIL" > "$tmpdir/$node"
+      fi
+    ) &
+  done
+  wait
+
   local failed=()
   for node in rk1-node1 rk1-node2 rk1-node3 rk1-node4; do
     local new_ip="${NODE_NEW_IP[$node]}"
-    info "$node — polling $new_ip (up to 120s)…"
-    if poll_ssh "$NODE_USER" "$NODE_PASS" "$new_ip" 120; then
-      info "OK — $node is live at $new_ip after reboot"
+    local result
+    result=$(cat "$tmpdir/$node" 2>/dev/null || echo "FAIL")
+    if [[ "$result" == "OK" ]]; then
+      info "OK — $node is live at ${new_ip} after reboot"
     else
       echo "  FAIL: $node did not come back at $new_ip"
       failed+=("$node")
     fi
   done
+  rm -rf "$tmpdir"
 
   echo
   if [[ ${#failed[@]} -eq 0 ]]; then
