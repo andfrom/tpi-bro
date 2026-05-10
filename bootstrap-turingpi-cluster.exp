@@ -252,6 +252,33 @@ proc ssh_shell {ip user pass commands} {
   send -- "exit\r"; expect eof; return 0
 }
 
+# Ubuntu 24.10+ forces an immediate interactive password change on first boot.
+# This proc detects that condition and resolves it by setting a known-strong temp
+# password, then returns that temp password so the caller can reconnect.
+# If no forced change is needed, returns $old_pass unchanged.
+# Uses a hardcoded temp password that satisfies pam_pwquality; A5 then uses
+# sudo chpasswd (which bypasses pam_pwquality) to set the actual desired password.
+proc unlock_expired_password {ip user old_pass} {
+  set TEMP "Ubuntu@T3mP!0"
+  set result $old_pass
+  spawn ssh -tt -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 $user@$ip
+  set timeout 30
+  expect {
+    -re {[Cc]urrent.*[Pp]assword:} { set result $TEMP; send "$old_pass\r"; exp_continue }
+    -re {[Rr]etype.*[Nn]ew.*[Pp]assword:} { send "$TEMP\r"; exp_continue }
+    -re {[Nn]ew.*[Pp]assword:}            { send "$TEMP\r"; exp_continue }
+    -re {[Pp]assword:}                    { send "$old_pass\r"; exp_continue }
+    -re {Authentication token manipulation} {
+      die "Could not set temp password on $ip — pam_pwquality rejected it.\nPlease report this as a bug."
+    }
+    -re {\$ } { send "exit\r"; exp_continue }
+    eof {}
+    timeout {}
+  }
+  return $result
+}
+
 # Checks
 proc check_bmc_known {state} { set ip [state_get $state "bmc_ip" ""]; return [expr {$ip ne ""}] }
 proc check_node_named {ip nodename user pass} {
@@ -1080,13 +1107,20 @@ proc stage_A5_name_password_reboot {dry stateRef} {
     if {[check_node_named $ip $name $::DEFAULT_USER $::NEW_PASS]} {
       say "  $name already configured"; continue
     }
+    # Ubuntu 24.10+ forces a password change on first boot — resolve it first.
+    # unlock_expired_password returns DEFAULT_PASS unchanged if no expiry is active.
+    set effective_pass [unlock_expired_password $ip $::DEFAULT_USER $::DEFAULT_PASS]
+    if {$effective_pass ne $::DEFAULT_PASS} {
+      say "  $name: handled forced password expiry; reconnecting…"
+      after 3000
+    }
     set cmds [list \
       "echo '$::DEFAULT_USER:$::NEW_PASS' | sudo chpasswd" \
       "sudo hostnamectl set-hostname $name" \
       "echo '127.0.1.1 $name' | sudo tee -a /etc/hosts >/dev/null" \
       "sudo reboot" \
     ]
-    set rc [ssh_shell $ip $::DEFAULT_USER $::DEFAULT_PASS $cmds]
+    set rc [ssh_shell $ip $::DEFAULT_USER $effective_pass $cmds]
     if {$rc != 0} {
       die "Could not SSH to $name ($ip) as $::DEFAULT_USER with DEFAULT_PASS.\nNodes must start at factory defaults (DEFAULT_PASS='$::DEFAULT_PASS').\nIf nodes have a non-default password, set DEFAULT_PASS=<current> in bootstrap-config.kv or run teardown first."
     }
@@ -1134,7 +1168,7 @@ proc stage_A7_ephemeral_registry_phaseA {dry stateRef} {
   if {$dry} {
     if {$ip eq ""} { set ip "<ip-$reg>" }
     say "DRY: would on $reg ($ip):"
-    say "DRY:   apt-get install -y docker.io (if needed)"
+    say "DRY:   curl https://get.docker.com | sudo sh (if docker not present)"
     say "DRY:   systemctl enable --now docker"
     say "DRY:   docker rm -f registry || true"
     say "DRY:   docker run -d --name registry --restart=always -p $::REGISTRY_PORT:$::REGISTRY_PORT registry:2"
@@ -1142,9 +1176,10 @@ proc stage_A7_ephemeral_registry_phaseA {dry stateRef} {
   }
 
   if {$ip eq ""} { die "Missing IP for $reg; rerun --from A4" }
+  if {$::NEW_PASS eq ""} { set ::NEW_PASS [ask_secret "Node password (set during A5): "] }
 
   set cmds [list \
-    "if ! command -v docker >/dev/null 2>&1; then sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io; fi" \
+    "if ! command -v docker >/dev/null 2>&1; then curl -fsSL https://get.docker.com | sudo sh; fi" \
     "sudo systemctl enable --now docker" \
     "sudo docker rm -f registry >/dev/null 2>&1 || true" \
     "sudo docker run -d --name registry --restart=always -p $::REGISTRY_PORT:$::REGISTRY_PORT registry:2" \
