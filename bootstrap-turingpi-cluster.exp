@@ -281,22 +281,17 @@ proc check_registry_http_up {ip port} {
 # action: "on" | "off"
 # Uses $::BMC_HOST if set, so mDNS failures don't stall the script.
 proc tpi_power {node action} {
-  set args [list tpi]
-  if {$::BMC_HOST ne ""} { lappend args --host $::BMC_HOST }
-  lappend args power $action
-  if {$node ne "all"} { lappend args -n $node }
-  say "  BMC: [join $args { }]"
-  set rc [catch {exec {*}$args} out]
+  set cmd "tpi power $action"
+  if {$node ne "all"} { append cmd " -n $node" }
+  say "  BMC: $cmd"
+  lassign [bmc_cmd $cmd] rc out
   if {$rc} { say "  WARNING: tpi power $action → $out"; return 1 }
   if {[string trim $out] ne ""} { say "  $out" }
   return 0
 }
 
 proc tpi_status {} {
-  set args [list tpi]
-  if {$::BMC_HOST ne ""} { lappend args --host $::BMC_HOST }
-  lappend args power status
-  set rc [catch {exec {*}$args} out]
+  lassign [bmc_cmd "tpi power status"] rc out
   if {$rc} { return "unknown ($out)" }
   return $out
 }
@@ -304,12 +299,8 @@ proc tpi_status {} {
 # Query BMC firmware version via tpi info.
 # Returns the version string (e.g. "2.3.2") or dies on failure.
 proc bmc_firmware_version {} {
-  set args [list tpi]
-  if {$::BMC_HOST ne ""} { lappend args --host $::BMC_HOST }
-  lappend args info
-  set rc [catch {exec {*}$args} out]
+  lassign [bmc_cmd "tpi info"] rc out
   if {$rc} { die "Cannot query BMC info: $out" }
-  # Parse "version   : 2.3.2" from table output
   if {[regexp { version\s*:\s*(\S+)} $out -> ver]} { return [string trim $ver] }
   die "Could not parse BMC firmware version from tpi info output:\n$out"
 }
@@ -375,7 +366,7 @@ proc bmc_stream {cmd timeout_s} {
   set bmc $::BMC_HOST
   if {$bmc eq ""} { die "BMC host not known. Run A1 first or set BMC_HOST in config." }
   set output ""
-  spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  spawn ssh -tt -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=5 -o BatchMode=no $::BMC_USER@$bmc $cmd
   log_user 0
   set timeout $timeout_s
@@ -665,7 +656,7 @@ proc stage_A0_bmc_firmware {dry stateRef} {
   set deadline [expr {[clock seconds] + 120}]
   after 5000
   while {[clock seconds] < $deadline} {
-    set rc [catch {exec tpi --host $::BMC_HOST info 2>/dev/null} out]
+    lassign [bmc_cmd "tpi info" 10] rc out
     if {!$rc} { break }
     after 3000
   }
@@ -1276,6 +1267,7 @@ if {$BMC_HOST eq "" && [dict exists $state "bmc_ip"]} {
   say "Restored BMC host from state: $BMC_HOST"
 }
 set _t0 [clock seconds]
+set _stage_log {}
 
 if {$rediscover} {
   set _tr [clock seconds]
@@ -1300,7 +1292,18 @@ for {set idx $startIdx} {$idx <= $endIdx} {incr idx} {
     "A7_ephemeral_registry_phaseA" { stage_A7_ephemeral_registry_phaseA $dryrun state }
     default { say "  (unimplemented stage placeholder)" }
   }
-  say "  ↳ $s: [elapsed [expr {[clock seconds] - $_ts}]] (total [elapsed [expr {[clock seconds] - $_t0}]])"
+  set _stage_secs [expr {[clock seconds] - $_ts}]
+  say "  ↳ $s: [elapsed $_stage_secs] (total [elapsed [expr {[clock seconds] - $_t0}]])"
+  lappend _stage_log [list $s $_stage_secs]
   if {!$dryrun} { kv_save $STATE_FILE $state }
 }
-say "Done. Total: [elapsed [expr {[clock seconds] - $_t0}]]"
+
+set _total [expr {[clock seconds] - $_t0}]
+say ""
+say "── Timing summary ──────────────────────────────"
+foreach entry $_stage_log {
+  lassign $entry _sn _ss
+  say [format "  %-38s %s" $_sn [elapsed $_ss]]
+}
+say [format "  %-38s %s" "TOTAL" [elapsed $_total]]
+say "────────────────────────────────────────────────"

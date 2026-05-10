@@ -1,11 +1,16 @@
 # Bootstrap state — contains discovered IPs and passwords; never commit
 bootstrap-state.kv
 bootstrap-state.json
+bootstrap-state.kv.bak.*
 
-# Live cluster config — contains BMC IP; gitignored so it stays local
+# Logs
+*.logs
+
+# Live cluster config — contains BMC IP, real URLs; gitignored so it stays local
 bootstrap-config.kv
 bmc-manifest.kv
 images-manifest.kv
+images-manifest-bmc.kv
 image-cache/
 
 # Old/superseded scripts
