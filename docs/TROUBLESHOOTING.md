@@ -18,6 +18,7 @@ full bootstrap sessions. Ordered roughly by the phase where each issue appears.
 9. [Docker](#9-docker)
 10. [TLS / certificates](#10-tls--certificates)
 11. [k3s / Kubernetes](#11-k3s--kubernetes)
+12. [Phase B2 setup-registry.sh](#12-phase-b2-setup-registrysh)
 12. [Registry — Phase A (HTTP)](#12-registry--phase-a-http)
 13. [Registry — Phase B (TLS + auth)](#13-registry--phase-b-tls--auth)
 14. [Expect script / bootstrap automation](#14-expect-script--bootstrap-automation)
@@ -516,6 +517,58 @@ K3S_URL="https://rk1-node1:6443" K3S_TOKEN="<token>" \
 sudo systemctl restart k3s          # server node
 sudo systemctl restart k3s-agent    # agent nodes
 ```
+
+---
+
+## 12. Phase B2 setup-registry.sh
+
+### Script exits silently with no output (exit code 1)
+
+**Cause:** `set -euo pipefail` is active. `kv_get` uses a `grep | head | cut`
+pipeline. When a config key is absent, `grep` returns exit code 1. With
+`pipefail`, the pipeline returns 1. The assignment `VAR=$(kv_get KEY file)`
+propagates that exit code, and `set -e` kills the script before any stage
+function runs — so no output appears at all.
+
+**Fix (already applied):** `kv_get` ends with `|| true` so a missing key always
+returns 0; the existing `[[ -n "$VAR" ]] || default=` guards handle the empty
+value. If you copy `kv_get` to a new script, include the `|| true`.
+
+**Diagnose with:** `bash -x ./scripts/setup-registry.sh 2>&1 | cat` — look for
+the last `++ grep` line; if the trace stops right after the corresponding
+`+ VAR=` assignment, a missing key is the culprit.
+
+### `systemctl is-active` detection returns wrong service name
+
+**Cause:** `systemctl is-active k3s` prints `"active"` to stdout. If that
+output is captured alongside `echo k3s` in a command substitution, the variable
+contains `"active\nk3s"` instead of `"k3s"`, and the `case` branch never
+matches.
+
+**Fix (already applied):** Use `if systemctl is-active k3s &>/dev/null; then
+echo k3s; ...` — redirect all `systemctl` output to `/dev/null` and rely only
+on the exit code.
+
+### `tee: /etc/rancher/k3s/registries.yaml: No such file or directory` on agent nodes
+
+**Cause:** k3s-agent does not create `/etc/rancher/k3s/` during install; only
+the k3s server does.
+
+**Fix (already applied):** `install-ca.sh` runs `sudo mkdir -p /etc/rancher/k3s`
+before writing `registries.yaml`. If you see this error on a fresh node, run
+`./scripts/setup-registry.sh --ca-only` to re-apply.
+
+### Laptop Docker CA trust requires sudo — how to run non-interactively
+
+`setup-registry.sh` calls `sudo mkdir`, `sudo cp`, and `sudo systemctl restart
+docker` for the laptop trust step. These will prompt for a password unless the
+running user has passwordless sudo.
+
+**Options:**
+- Run the script from a terminal where sudo is already cached (most common case)
+- Add a targeted sudoers rule: `NOPASSWD: /bin/systemctl restart docker`
+- Pre-install the CA manually once; the script skips the step if the cert is
+  already current (`diff -q` check)
 
 ### kubectl create secret fails if secret already exists
 

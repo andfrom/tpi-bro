@@ -1,6 +1,6 @@
 # tpi-bro — Project Status
 
-_Last updated: 2026-05-10_
+_Last updated: 2026-05-11_
 
 ## Summary
 
@@ -35,25 +35,34 @@ tpi-bro bootstraps a TuringPi 2 board (4× RK1 ARM64 compute modules) from bare 
 
 ## Phase B — k3s + Persistent Registry
 
-**Overall: NOT STARTED**
+**Overall: B0–B2 COMPLETE**
 
-Phase B is entirely Helm/GitOps — **no Expect stages**. The Expect script's job ends at A7. See `TODO.md` for the full task breakdown and script designs.
+Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Expect script's job ends at A7.
 
-| Step | What | Status |
-|------|------|--------|
-| B0-dhcp | DHCP reservations in router (prerequisite for stable SANs) | Not done |
-| B0-ssh | SSH key auth + passwordless sudo on all nodes | Not done |
-| B0-env | `bootstrap.env` single config source | Not done |
-| B1-k3s | k3s server on node1 (`--tls-san` required) + agent on nodes 2–4 | Not started |
-| B1-kubeconfig | `prep-kubeconfig-local.sh` — laptop kubectl access | Not started |
-| B2-certs | `gen-registry-certs.sh` (multi-SAN: hostname + static IP + future MetalLB VIP) | Script exists (partial); not run |
-| B2-storage | Persistent volume for registry data | Not started |
-| B2-registry | Upgrade to TLS+auth via `charts/registry/` Helm chart | Chart exists; not deployed |
-| B2-ca | `install-ca.sh` — distribute CA cert to all nodes + containerd mirror config | Not started |
-| B2-verify | End-to-end `docker login` + push + k3s pull smoke test | Not done |
-| B3-makefile | `Makefile` orchestrating all Phase B steps | Not started |
-| B4-gitops | Argo CD or Flux install + platform repo structure | Not started |
-| B5-metallb | MetalLB for stable registry VIP (replaces DHCP reservation) | Not started |
+| Step | What | Script | Status |
+|------|------|--------|--------|
+| B0-static-ips | Static IPs on BMC + all nodes; netplan on Ubuntu, ifupdown on BMC | `setup-static-ips.sh` | **Done** 2026-05-09 |
+| B0-ssh | SSH key auth + passwordless sudo on all nodes | `setup-ssh-keys.sh` | **Done** 2026-05-09 |
+| B1-k3s | k3s v1.35.4+k3s1 server on node1 + agents on nodes 2–4 | `install-k3s.sh` | **Done** 2026-05-09 |
+| B1-kubeconfig | Laptop kubeconfig at `~/.kube/config` | `install-k3s.sh --kubeconfig` | **Done** 2026-05-09 |
+| B2-certs | TLS cert + self-signed CA (SAN: hostname + static IP) | `gen-registry-certs.sh` (via `setup-registry.sh`) | **Done** 2026-05-11 |
+| B2-registry | Helm chart deployed; HostPort 5000 on node1; PVC local-path 50Gi | `setup-registry.sh` | **Done** 2026-05-11 |
+| B2-ca | CA distributed to all 4 nodes; `registries.yaml` mirror configured; services restarted | `install-ca.sh` (via `setup-registry.sh`) | **Done** 2026-05-11 |
+| B2-laptop | Laptop Docker CA trust automated (idempotent; restarts Docker only when cert changes) | `setup-registry.sh` | **Done** 2026-05-11 |
+| B2-verify | `docker push` + `docker pull` from laptop verified end-to-end | `setup-registry.sh --verify` | **Done** 2026-05-11 |
+| B2-auth | Enable basic auth on registry (`auth.enabled=true` + htpasswd Secret) | manual helm upgrade | **Next** |
+| B3-pod-pull | Test k3s pod pulling from `rk1-node1:5000` (containerd mirror smoke test) | — | TODO |
+| B4-gitops | Argo CD or Flux install + platform repo structure | — | Not started |
+| B5-metallb | MetalLB for stable registry VIP | — | Not started |
+
+### Running Phase B2
+
+```bash
+./scripts/setup-registry.sh          # full deploy (idempotent)
+./scripts/setup-registry.sh --verify # test push/pull after deploy
+```
+
+Prerequisite: `helm` must be installed on the laptop (see `docs/PREREQUISITES.md`). All other steps are automated including laptop Docker CA trust.
 
 ---
 
@@ -69,30 +78,27 @@ Phase B is entirely Helm/GitOps — **no Expect stages**. The Expect script's jo
 
 ---
 
-## Hardware State (as of 2026-05-10)
+## Hardware State (as of 2026-05-11)
 
-Phase A fully validated on 2026-05-10 with Ubuntu 24.04.1 LTS (joshua-riek/ubuntu-rockchip v2.4.0) via `--flash bmc`. All 4 nodes bootstrapped end-to-end in ~1 hour (52 min flash + 8 min A4–A7).
+Phase B2 complete. All 4 nodes running k3s v1.35.4+k3s1 with containerd 2.2.3. Persistent HTTPS registry deployed and verified.
 
-| Node | Hostname | Status |
-|------|----------|--------|
-| 1 | rk1-node1 | Phase A complete; Docker 29.4.3 + registry:2 running |
-| 2 | rk1-node2 | Phase A complete |
-| 3 | rk1-node3 | Phase A complete |
-| 4 | rk1-node4 | Phase A complete |
+| Node | Hostname | Static IP | Status |
+|------|----------|-----------|--------|
+| 1 | rk1-node1 | 192.168.1.11 | k3s server; registry pod running; Docker 29.4.3 (Phase A container stopped) |
+| 2 | rk1-node2 | 192.168.1.12 | k3s agent |
+| 3 | rk1-node3 | 192.168.1.13 | k3s agent |
+| 4 | rk1-node4 | 192.168.1.14 | k3s agent |
+
+Static IPs configured via netplan (nodes) + ifupdown (BMC). Persist across reboots. DHCP drift no longer a concern.
+
+**BMC:** `turingpi.local` / `192.168.1.10` — accessible over WiFi.
 
 IPs, MACs, and other operational details are in `bootstrap-state.kv` (gitignored) and `~/.turingpi/`.
-
-**BMC:** `turingpi.local` — accessible over WiFi.
-
-**⚠ DHCP reservations not yet configured.** All 4 node IPs drift on every reboot. Use `./scripts/bootstrap-turingpi-cluster.exp --rediscover` after any power cycle until static reservations are set in the router (MACs available from `bootstrap-state.kv` or from A4 output).
 
 ---
 
 ## Immediate Next Steps
 
-1. **DHCP reservations** — configure MAC→IP bindings in router for all 4 nodes (see Hardware State table above); prerequisite for stable Phase B operation
-2. **Hardware cycle** — run `./tests/run-hardware.sh --cycles 2` on the live cluster to confirm Phase A end-to-end
-3. **B-01**: Install k3s on node1 (server role)
-4. **B-02**: Join nodes 2–4 as k3s workers
-5. **B-03**: Configure containerd registry mirror on all nodes
-6. **B-04**: Deploy persistent registry via `charts/registry/`
+1. **Enable registry auth** — create htpasswd Secret and set `auth.enabled=true` via `helm upgrade` (see B2-auth in `mem/backlog/BACKLOG.md`)
+2. **Test k3s pod pull** — deploy a test Pod that pulls from `rk1-node1:5000` to confirm containerd mirror config end-to-end
+3. **Phase B3+** — GitOps controller (Argo CD or Flux), platform repo, MetalLB

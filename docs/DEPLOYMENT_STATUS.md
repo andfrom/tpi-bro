@@ -1,6 +1,6 @@
 # tpi-bro — Deployment Status
 
-_Last updated: 2026-05-10_
+_Last updated: 2026-05-11_
 
 ## Cluster Hardware
 
@@ -13,31 +13,31 @@ _Last updated: 2026-05-10_
 | GPU | Mali G610 MP4 (display / OpenCL only — not useful for LLM inference) |
 | NPU | 6 TOPS per module |
 | Estimated power | ~10 W per module at idle |
-| Registry node IP | DHCP — configure static reservation before Phase B; see `bootstrap-state.kv` |
+| Node IPs | Static: node1=192.168.1.11, node2=.12, node3=.13, node4=.14, BMC=.10 |
 | BMC hostname | `turingpi.local` (mDNS) |
 
 ## Node Role Assignment (planned)
 
-| Node | Hostname | Role |
-|------|----------|------|
-| 1 | rk1-node1 | k3s server + Agent A LLM agent + ephemeral registry |
-| 2 | rk1-node2 | k3s worker — future LLM agent |
-| 3 | rk1-node3 | k3s worker — future LLM agent |
-| 4 | rk1-node4 | k3s worker — RAG / vector DB / supporting infra |
+| Node | Hostname | IP | Role |
+|------|----------|----|------|
+| 1 | rk1-node1 | 192.168.1.11 | k3s server + persistent registry + future Agent A LLM agent |
+| 2 | rk1-node2 | 192.168.1.12 | k3s agent — future LLM agent |
+| 3 | rk1-node3 | 192.168.1.13 | k3s agent — future LLM agent |
+| 4 | rk1-node4 | 192.168.1.14 | k3s agent — RAG / vector DB / supporting infra |
 
 ## Software Stack
 
 | Layer | Tool | Status |
 |-------|------|--------|
 | OS | Ubuntu 24.04.1 LTS ARM64 (joshua-riek/ubuntu-rockchip v2.4.0) | Deployed on all 4 nodes (2026-05-10) |
-| Container runtime (Phase A) | Docker (node1 only, for registry) | Running |
-| Container runtime (Phase B) | containerd (via k3s) | Not started |
-| Orchestrator | k3s | Not installed |
+| Container runtime (Phase A) | Docker (node1 only, for Phase A registry) | Stopped (Phase B registry replaced it) |
+| Container runtime (Phase B) | containerd 2.2.3 (via k3s) | Running on all 4 nodes |
+| Orchestrator | k3s v1.35.4+k3s1 | Running (node1 server, nodes 2–4 agents) |
 | GitOps | Argo CD or Flux (TBD) | Not installed |
-| Registry (Phase A) | registry:2 container, HTTP, port 5000 | Running on node1 |
-| Registry (Phase B) | Helm chart (`charts/registry/`), TLS + auth | Not deployed |
+| Registry (Phase A) | registry:2 container, HTTP, port 5000 | Stopped (replaced by Phase B) |
+| Registry (Phase B) | Helm chart (`charts/registry/`), TLS, no auth yet | **Running** on node1 (HostPort 5000, PVC 50Gi local-path) |
 | LLM runtime | Ollama | Not installed |
-| Ingress | Traefik (k3s built-in) | Not installed |
+| Ingress | Traefik (k3s built-in) | Running (k3s default) |
 
 ## Access Methods
 
@@ -51,10 +51,12 @@ _Last updated: 2026-05-10_
 
 ## Registry TLS Cert Status
 
-- `gen-registry-certs.sh` script exists and is ready to run
-- SAN includes: `rk1-node1`, and the planned static IP for node1 (update before generating)
-- Certs not yet generated (Phase B pre-requisite; configure DHCP reservation for node1 first so the IP in the SAN is stable)
-- Generated artefacts are `.gitignore`d (`registry-certs/`, `*.key`, `*.crt`, etc.)
+- **Certs generated and deployed** (2026-05-11)
+- SAN includes: `rk1-node1` (DNS) and `192.168.1.11` (IP) — matches static IP
+- Self-signed CA (`myCA.crt`) trusted by all 4 nodes and laptop Docker daemon
+- `registry-tls` Secret in namespace `registry` contains `registry.crt` + `registry.key`
+- CA and cert artefacts in `registry-certs/` (gitignored)
+- Cert valid 825 days from generation; CA valid 3650 days
 
 ## Laptop Requirements
 
@@ -66,12 +68,13 @@ _Last updated: 2026-05-10_
 | `ssh` | Node access | Required |
 | `curl` | Health checks | Required |
 | `docker` | Image build + push | Required for image workflow |
-| `kubectl` | Cluster management | Not installed (kubectl binary gitignored) |
-| `helm` | Phase B registry deploy | Required for Phase B |
+| `kubectl` | Cluster management | Installed (`bin/kubectl`, vendored) |
+| `helm` | Phase B registry deploy | Installed (v3.20.2, `/usr/local/bin/helm`) |
 
 ## Known Issues
 
-- `turingpi.local` mDNS resolution can fail when only WiFi is available on some networks; fall back to scanning router DHCP table or using `nmap` on the LAN subnet
-- **DHCP leases for all 4 nodes drift on every reboot** — confirmed in validation run 2026-05-10; all nodes received new IPs after each A5 reboot. Configure static DHCP reservations in the router before Phase B. Use `--rediscover` to sync state + `/etc/hosts` after any power cycle until then.
-- Phase A registry is HTTP-only; laptop Docker daemon must have `rk1-node1:5000` in `insecure-registries`
-- Ubuntu 24.04.1 LTS (like 24.10) enforces a mandatory password change on first boot; the bootstrap script handles this automatically via `unlock_expired_password`
+- `turingpi.local` mDNS resolution can fail when only WiFi is available on some networks; fall back to using the static IP `192.168.1.10` directly
+- Phase A registry container was HTTP-only; it has been stopped and replaced by the Phase B HTTPS registry
+- Ubuntu 24.04.1 LTS enforces a mandatory password change on first boot; the bootstrap script handles this automatically via `unlock_expired_password`
+- **Registry auth is currently disabled** — `auth.enabled=false` in the Helm chart (TLS-first approach per ADR-0004). Enable after verifying TLS stability: create an htpasswd Secret and run `helm upgrade` with `--set auth.enabled=true`
+- k3s pod pull from the registry has not yet been smoke-tested end-to-end (laptop `docker push`/`pull` is verified; containerd mirror path is configured but not exercised by a live Pod)
