@@ -20,7 +20,8 @@ persistence:
 #   OLLAMA_KEEP_ALIVE: how long to keep a model loaded after last request
 #                      (default 5m; set to -1 to keep forever)
 #   OLLAMA_NUM_PARALLEL: concurrent inference requests (default 1)
-extraEnv: []
+extraEnv:
+  - OLLAMA_KEEP_ALIVE=-1   # keep model loaded indefinitely; eliminates cold-start penalty
 
 priorityClassName: background
 
