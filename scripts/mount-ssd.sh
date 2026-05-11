@@ -127,6 +127,7 @@ mount_node() {
 
   if (( DRY )); then
     info "[dry-run] Would: mkdir -p /mnt/ssd, fstab UUID entry, mount -a"
+    info "[dry-run] Would: kubectl label node ${node} storage.tpi-bro/nvme=true"
     return 0
   fi
 
@@ -162,6 +163,14 @@ mount_node() {
 
   # Create provisioner subdirectory now so the provisioner pod can write to it
   node_ssh "$ip" "sudo mkdir -p /mnt/ssd/local-path-provisioner && sudo chmod 777 /mnt/ssd/local-path-provisioner"
+
+  # Label the node so workloads can express "I need NVMe" without naming a host
+  if ! (( DRY )); then
+    kubectl label node "$node" storage.tpi-bro/nvme=true --overwrite
+    info "${node}: labelled storage.tpi-bro/nvme=true"
+  else
+    info "[dry-run] Would: kubectl label node ${node} storage.tpi-bro/nvme=true"
+  fi
 }
 
 # ---- deploy StorageClass + provisioner --------------------------------------

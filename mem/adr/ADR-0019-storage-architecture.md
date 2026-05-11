@@ -1,53 +1,112 @@
-# ADR-0019: Storage Architecture — Local SSD, DB-as-Service, No Shared Filesystems
+# ADR-0019: Storage Architecture — Local SSD, Dynamic Placement, No Shared Filesystems
 
-**Status:** Accepted  
+**Status:** Accepted (revised 2026-05-11 — removed static node pin; platform-first framing)  
 **Date:** 2026-05-11
 
 ## Context
 
-The cluster has 4× RK1 nodes. Each node has an NVMe SSD slot (to be mounted in B-09). The `sibling-app` application has 7 agents: 4 need read/write access to a item database; 3 are stateless (no persistent storage beyond model inference).
+The cluster has 4× RK1 nodes. Three nodes (1–3) have a 2TB NVMe SSD; node4 has
+only eMMC. The platform's job is to expose resources and get out of the way — it
+should not dictate which application lands on which node. Applications should be
+able to express their storage requirements as capabilities (`I need NVMe`) rather
+than as specific hostnames (`I need rk1-node4`).
 
 Three storage topologies were considered:
 
-1. **Shared NFS volume** — NFS server on one node; all agents mount the same volume for the DB files.
-2. **DB-as-Service** — a single DB pod (e.g., PostgreSQL) pinned to one node's local SSD, exposed as a Kubernetes Service; agents connect over the LAN.
-3. **Per-agent local DB** — each agent gets its own DB instance on its local SSD; agents stay fully self-contained.
+1. **Shared NFS volume** — one node serves NFS; all pods mount the same volume.
+2. **Local SSD with dynamic scheduling** — each node's SSD is a local volume. k3s schedules pods freely to any node that has storage, via `WaitForFirstConsumer` binding.
+3. **Per-node per-app silos** — every application gets its own DB instance pinned to a specific node. No sharing, no flexibility.
 
 ## Decision
 
-**DB-as-Service on node4, backed by local SSD. No shared filesystems.**
+**Local SSD with dynamic placement. No hardcoded node assignments. No shared
+filesystems.**
 
 ### Rules
 
-- **No NFS for database files.** PostgreSQL (and similar RDBMSs) require local-disk fsync semantics. NFS can silently corrupt a database on network disruption or unexpected unmount.
-- **Single DB pod, pinned to node4** (`nodeSelector: kubernetes.io/hostname: rk1-node4`). node4 is already designated for RAG / vector DB / supporting infra.
-- **DB exposed as a K8s Service** (`ClusterIP`). The 4 agents that need it connect via `postgresql.sibling-app.svc.cluster.local`. LAN latency for a pod-to-Service query is ~0.1–0.3 ms — acceptable for batch item queries.
-- **Stateless agents float freely.** The 3 agents with no DB dependency are scheduled by the default K8s scheduler, following model placement (see ADR-0003).
-- **DB-dependent agents colocate or accept the network hop.** For sibling-app, query latency over the LAN is not a bottleneck; the DB is not in the hot inference path.
+**No NFS or distributed filesystem for database files.** PostgreSQL and similar
+systems require local-disk fsync semantics. NFS can silently corrupt a database
+on network disruption. The added complexity of Longhorn/Ceph is not justified at
+this scale.
+
+**Storage is a capability, not an address.** Applications request storage via
+`storageClassName: local-ssd`. k3s schedules the pod to any node that has an SSD
+mounted, and the provisioner creates the PV there. No application manifest should
+reference a specific node hostname for storage reasons.
+
+**Node labels express capability.** `mount-ssd.sh` labels each node with
+`storage.tpi-bro/nvme=true` when it successfully mounts the SSD. Applications
+that need SSD storage express this as a `nodeAffinity` on that label — not a
+hostname pin. This means the platform can gain or lose SSD-capable nodes without
+changing application manifests.
+
+**Hardcoded hostname pins are only justified by hardware constraints**, not by
+storage policy. Current exceptions:
+- Registry: pinned to `rk1-node1` because of HostPort 5000 (a networking
+  constraint, not a storage one). Will be removed when MetalLB is in place (C-01).
+- Ollama: pinned to the node where model weights are downloaded (avoids
+  re-downloading 10–30 GB on reschedule). This is an Ollama concern, not a
+  platform policy.
+
+**`WaitForFirstConsumer` binding mode.** PVCs are not bound at creation time; the
+provisioner waits until a pod is scheduled. This gives k3s full scheduling
+freedom: it places the pod based on resource availability across nodes 1–3, then
+the PV is created there. If a node is busy or unavailable, k3s routes the pod to
+the next best option automatically.
+
+**Node4 has no NVMe.** It is excluded from the `local-ssd` provisioner's
+ConfigMap. Workloads that claim `local-ssd` storage will never land there. Node4
+is available for workloads that need no persistent storage or that use eMMC
+(acceptable for small config data, not for DB files or model weights).
 
 ### Registry storage
 
-The container registry PVC (currently backed by eMMC rootfs via local-path) must be relocated to node1's local SSD in B-09. The registry is a write-seldom, read-often workload — local SSD is the right tier.
+The registry PVC uses `local-ssd` on node1. It is the one legitimate hostname-
+pinned case because the HostPort is also on node1. Both the pin and the HostPort
+dependency will be removed together when MetalLB is deployed.
 
-### Model weights
+### Model weights (Ollama)
 
-Ollama model weights are stored on each node's local SSD. Pods are scheduled to the node where weights are already present (node affinity / nodeSelector). This eliminates cross-node model transfer on pod startup.
+Ollama weights are on each node's local SSD. The Ollama Deployment uses a
+`nodeAffinity` on `storage.tpi-bro/nvme=true` to restrict scheduling to SSD
+nodes. Individual Ollama instances may still get hostname-level affinity to avoid
+re-downloading weights, but that is an application concern managed in the Ollama
+chart — not a platform policy.
+
+### Database pods
+
+DB pods (PostgreSQL, vector DB) claim `local-ssd` storage and are scheduled
+dynamically by k3s to whichever SSD node has capacity. No nodeSelector is set in
+the platform. If a DB pod is rescheduled to a different node, it gets fresh
+storage there (the old data stays on the original node's SSD until the PV is
+reclaimed — `Delete` policy cleans it up). This is acceptable for a dev cluster;
+production would add a replica or backup before allowing rescheduling.
 
 ## Consequences
 
 **Positive:**
-- DB files on local SSD: safe fsync, predictable IOPS, no NFS dependency
-- Single DB pod: easy to backup, no replication complexity at this scale
-- Service abstraction: agents are location-independent; DB can move nodes by changing nodeSelector + PVC, no agent code changes
-- No shared filesystem: eliminates NFS as a single point of failure
+- Applications express requirements (`local-ssd`), not locations — easier to
+  manage, simpler manifests, no breakage when nodes change
+- k3s bin-packs workloads freely across nodes 1–3 based on actual resource usage
+- Adding node4's SSD later requires only plugging in the hardware and running
+  `mount-ssd.sh` — no manifest changes needed
+- The `storage.tpi-bro/nvme` label makes SSD capability discoverable and
+  addressable without inspecting individual node specs
 
 **Negative:**
-- DB node (node4) is a single point of failure for all 4 DB-dependent agents; if node4 goes down, those agents stop
-- Adding a replica (read replica or standby) is future work — not needed at this scale
-- Agents on nodes 1–3 incur ~0.1–0.3 ms LAN latency per DB query; acceptable now, revisit if query rate grows significantly
+- Local storage is inherently single-node — if that node goes down, the PV is
+  unavailable. Acceptable for a 4-node dev cluster; revisit with Longhorn if HA
+  becomes a requirement.
+- Rescheduling a stateful pod to a different node gives it empty storage.
+  Applications must handle this (re-seed, restore from backup, or accept loss).
+  For the registry this is fine (re-push). For a DB this requires operational care.
 
 ## Notes
 
-- NFS or a distributed filesystem (Longhorn, Ceph) may be reconsidered if multi-node DB replication becomes necessary. At 4 nodes and single-user workloads, the added complexity is not justified.
-- If the item dataset grows beyond node4's SSD capacity, the first lever is a larger SSD, not a distributed filesystem.
-- Registry replication across nodes is explicitly **not** needed. containerd caches image layers on each node after first pull; subsequent pod restarts are local-cache hits. A single registry on node1 is sufficient.
+- NFS or a distributed filesystem may be reconsidered if multi-node HA becomes
+  necessary. At 4 nodes and single-user workloads, the added complexity is not
+  justified.
+- The `local-ssd` StorageClass uses `reclaimPolicy: Delete` — PVs are cleaned up
+  when PVCs are deleted. Use `Retain` for data that must survive PVC deletion.
+- If node4 gets an NVMe later, run `mount-ssd.sh` — it auto-detects, formats,
+  mounts, labels the node, and adds it to the ConfigMap. No other changes needed.
