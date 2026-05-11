@@ -39,7 +39,7 @@ _Last updated: 2026-05-11 (N-01 Tailscale mesh — Layer 1 + Layer 2 complete)_
 | Storage | `local-ssd` StorageClass (rancher.io/local-path-ssd, WaitForFirstConsumer) | **Running** in kube-system; scoped to nodes 1–3 (NVMe only) |
 | LLM runtime | Ollama (`charts/ollama/`); one Deployment per NVMe node; 200Gi PVC `local-ssd` | **Running**; `llama3.2:3b` pulled on ollama-node1; namespace `ollama` |
 | Agent | `sibling-app` Agent A (`sibling-app/infra/k8s/agent-a.yaml`); FastAPI on port 18090; `OLLAMA_URL=http://ollama-node1.ollama:11434` | **Deployed**; namespace `sibling-app`; build+deploy via `deploy-agent-a.sh` |
-| Network mesh | Tailscale 1.96.4; all 4 nodes + laptop on Tailnet; subnet routes `10.42.0.0/16` + `10.43.0.0/16` advertised via node1 | **Running** — Layer 1 + Layer 2 done; Layer 3 (operator) TODO |
+| Network mesh | Tailscale 1.96.4; all 4 nodes + laptop on Tailnet; subnet routes `10.42.0.0/16` + `10.43.0.0/16` advertised via node1 | **Running** — all 3 layers done; `agent-a` exposed on Tailnet |
 | Ingress | Traefik (k3s built-in) | Running (k3s default); superseded by Tailscale operator for service exposure |
 
 ## Access Methods
@@ -66,7 +66,7 @@ Check live IPs with `tailscale status` or at <https://login.tailscale.com/admin/
 
 Subnet routes `10.42.0.0/16` (pods) and `10.43.0.0/16` (services) advertised by node1 and approved in Tailscale admin. Laptop runs `tailscale up --accept-routes`. All ClusterIP services are directly routable from the laptop — no port-forwarding required.
 
-Layer 3 (Tailscale Kubernetes operator) not yet deployed — see `docs/PREREQUISITES.md` for setup steps.
+Layer 3 (Tailscale Kubernetes operator) deployed in namespace `tailscale`. `agent-a` exposed as `agent-a.<tailnet>.ts.net:18090`. Add more services with `./scripts/setup-tailscale-operator.sh --expose svc/NAME -n NAMESPACE`.
 
 ## Registry TLS Cert Status
 

@@ -65,7 +65,7 @@ info "Advertising: ${POD_CIDR} (pods), ${SVC_CIDR} (services)"
 
 if (( DRY )); then
   info "[dry-run] Would: enable net.ipv4.ip_forward + net.ipv6.conf.all.forwarding on rk1-node${SERVER_IDX}"
-  info "[dry-run] Would: sudo tailscale up --hostname=rk1-node${SERVER_IDX} --advertise-routes=${POD_CIDR},${SVC_CIDR} --accept-routes --accept-dns=false"
+  info "[dry-run] Would: sudo tailscale up --hostname=rk1-node${SERVER_IDX} --advertise-routes=${POD_CIDR},${SVC_CIDR} --accept-routes=false --accept-dns=false"
   info ""
   info "[dry-run] ACTION REQUIRED after real run:"
   info "  https://login.tailscale.com/admin/machines → rk1-node${SERVER_IDX} → Edit route settings"
@@ -83,7 +83,7 @@ say "Advertising subnet routes…"
 node_ssh "$SERVER_IP" "sudo tailscale up \
   --hostname=rk1-node${SERVER_IDX} \
   --advertise-routes=${POD_CIDR},${SVC_CIDR} \
-  --accept-routes \
+  --accept-routes=false \
   --accept-dns=false"
 
 ts_ip=$(node_ssh "$SERVER_IP" "tailscale ip -4 2>/dev/null" || true)

@@ -15,8 +15,8 @@
 #   2. OAuth client in ~/.turingpi/credentials.kv:
 #        TAILSCALE_OAUTH_CLIENT_ID=<id>
 #        TAILSCALE_OAUTH_CLIENT_SECRET=<secret>
-#      Generate at: https://login.tailscale.com/admin/settings/oauth
-#      Scopes: write:devices (required), read:dns (for MagicDNS)
+#      Generate at: https://login.tailscale.com/admin/settings/trust-credentials
+#      Scopes: Devices → Core → Write (required), DNS → Read (for MagicDNS)
 #   3. helm on the laptop
 #
 # Usage:
@@ -107,6 +107,7 @@ helm upgrade --install "$HELM_RELEASE" tailscale/tailscale-operator \
   --create-namespace \
   --set-string oauth.clientId="${CLIENT_ID}" \
   --set-string oauth.clientSecret="${CLIENT_SECRET}" \
+  --set-string proxyConfig.defaultTags="tag:k8s-operator" \
   --wait --timeout 120s
 
 say "Done."

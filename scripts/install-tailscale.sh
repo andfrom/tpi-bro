@@ -121,7 +121,7 @@ for i in "${!NODE_IPS[@]}"; do
     --auth-key=${AUTH_KEY} \
     --hostname=${name} \
     --accept-dns=false \
-    --accept-routes"
+    --accept-routes=false"
 
   ts_ip=$(node_ssh "$ip" "tailscale ip -4 2>/dev/null" || true)
   info "Tailscale IP: ${ts_ip:-<check admin console>}"

@@ -172,8 +172,17 @@ sudo tailscale up --accept-routes
 
 Exposes individual services on the Tailnet by name. Requires an OAuth client:
 
-1. Go to **<https://login.tailscale.com/admin/settings/oauth>** → **Generate OAuth client**
-2. Scopes: `devices:write` (required), `dns:read` (for MagicDNS)
+1. Go to **<https://login.tailscale.com/admin/settings/trust-credentials>**
+2. **Create the tag first** (navigating away mid-credential loses your state):
+   - Click **+ Create tag** → name it `k8s-operator` → save
+   - Tailscale stores it as `tag:k8s-operator`; this tag is assigned to every device the operator creates
+3. Now click **+ Credential** and proceed through the two-step wizard:
+   - Step 1 (Settings): give it a name (e.g. `k8s-operator`)
+   - Step 2 (Scopes) → Custom scopes → tick:
+     - **Devices → Core → Write** — the Tags field will appear; add `tag:k8s-operator`
+     - **Keys → Auth Keys → Write** — operator needs this to create auth keys for proxy devices (`tag:k8s-operator` is added automatically)
+     - **DNS → Read** — for MagicDNS hostname resolution
+   - Click **Generate credential**
 3. Add to `~/.turingpi/credentials.kv`:
    ```
    TAILSCALE_OAUTH_CLIENT_ID=<id>
