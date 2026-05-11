@@ -22,6 +22,11 @@ Stages T1–T8: load state → verify SSH → stop registry → reset passwords 
 **Status:** DONE  
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs `./tests/run-ci.sh` on every push/PR to main. No hardware required.
 
+### A-08: Lint CI + Phase B cluster health check
+**Status:** DONE (2026-05-11)  
+CI (`lint` job in `.github/workflows/ci.yml`) runs `shellcheck --severity=warning` on all Phase B shell scripts and `helm lint` + `helm template` on `charts/registry/` on every push/PR. No hardware required.  
+`tests/check-cluster.sh` (Suite 4) runs 10 named checks against a live cluster: nodes Ready, registry pod, TLS, auth, push, and per-node pod pull via containerd mirror. `--quick` skips the pod pull tests.
+
 ### A-05: Real flash modes (image / download / local)
 **Status:** DONE  
 `--flash image` flashes per-node image files via `tpi flash --image-path`. `--flash download` downloads from a manifest (`images-manifest.kv`), verifies SHA256, caches in `./image-cache/`, and re-downloads on checksum mismatch. `--flash local` uses `tpi flash --local`. All four modes (`skip` / `local` / `image` / `download`) are implemented and tested.
@@ -67,27 +72,40 @@ GitHub Actions workflow (`.github/workflows/ci.yml`) runs `./tests/run-ci.sh` on
 `setup-registry.sh --verify` confirms `docker push` + `docker pull` from laptop via HTTPS with CA trust. Registry at `rk1-node1:5000` working.
 
 ### B-07: Enable registry basic auth
-**Status:** TODO  
-TLS is verified and stable. Next step: enable basic auth per ADR-0004.
-```bash
-# Create htpasswd secret
-htpasswd -Bbn push 'S3cret!' > /tmp/htpasswd
-kubectl -n registry create secret generic registry-htpasswd \
-  --from-file=htpasswd=/tmp/htpasswd
-rm /tmp/htpasswd
-
-# Enable auth in Helm
-helm upgrade registry charts/registry -n registry --set auth.enabled=true
-```
+**Status:** DONE (2026-05-11)  
+`./scripts/setup-registry.sh --enable-auth` creates htpasswd Secret from `~/.turingpi/credentials.kv` and upgrades the Helm release with `auth.enabled=true`. `--verify` now detects auth and logs in automatically. Deployment strategy fixed to `Recreate` to avoid HostPort conflicts during rolling upgrade.
 
 ### B-08: Test k3s pod pull from registry
+**Status:** DONE (2026-05-11)  
+Pod scheduled to rk1-node3 pulled `rk1-node1:5000/test:latest` in 505ms via containerd mirror (`registries.yaml` uses IP endpoint `https://192.168.1.11:5000` so no hostname DNS needed on worker nodes). Auth credentials embedded in mirror config. Phase A HTTP registry container (docker-proxy) conflict resolved — removed from node1.
+
+### B-09: Mount NVMe SSDs on all nodes
 **Status:** TODO  
-Deploy a test Pod that pulls an image from `rk1-node1:5000` to confirm the containerd mirror config is working end-to-end (not just laptop Docker push/pull).
+**Must complete before Ollama and before relocating the registry PVC.**  
+Format and mount NVMe SSD on each node; create a Kubernetes StorageClass backed by local SSD paths; relocate the registry PVC from eMMC (local-path) to SSD.
+
+Steps per node:
 ```bash
-kubectl run test-pull --image=rk1-node1:5000/test:latest --restart=Never
-kubectl get pod test-pull
-kubectl delete pod test-pull
+# Identify NVMe device
+lsblk | grep nvme
+
+# Partition + format (adjust /dev/nvme0n1 as needed)
+sudo parted /dev/nvme0n1 mklabel gpt
+sudo parted /dev/nvme0n1 mkpart primary ext4 0% 100%
+sudo mkfs.ext4 /dev/nvme0n1p1
+
+# Mount point
+sudo mkdir -p /mnt/ssd
+echo "/dev/nvme0n1p1  /mnt/ssd  ext4  defaults,noatime  0  2" | sudo tee -a /etc/fstab
+sudo mount -a
 ```
+
+After all nodes are mounted:
+- Create a `local` StorageClass pointing to `/mnt/ssd/` paths
+- Recreate the registry PVC on SSD
+- Recreate `registry-tls` Secret and redeploy registry chart
+
+See ADR-0019 for storage architecture decisions.
 
 ---
 

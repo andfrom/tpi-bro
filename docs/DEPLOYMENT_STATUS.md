@@ -1,6 +1,6 @@
 # tpi-bro — Deployment Status
 
-_Last updated: 2026-05-11_
+_Last updated: 2026-05-11 (B-07/B-08 complete)_
 
 ## Cluster Hardware
 
@@ -35,7 +35,7 @@ _Last updated: 2026-05-11_
 | Orchestrator | k3s v1.35.4+k3s1 | Running (node1 server, nodes 2–4 agents) |
 | GitOps | Argo CD or Flux (TBD) | Not installed |
 | Registry (Phase A) | registry:2 container, HTTP, port 5000 | Stopped (replaced by Phase B) |
-| Registry (Phase B) | Helm chart (`charts/registry/`), TLS, no auth yet | **Running** on node1 (HostPort 5000, PVC 50Gi local-path) |
+| Registry (Phase B) | Helm chart (`charts/registry/`), TLS + basic auth | **Running** on node1 (HostPort 5000, PVC 50Gi local-path) |
 | LLM runtime | Ollama | Not installed |
 | Ingress | Traefik (k3s built-in) | Running (k3s default) |
 
@@ -71,10 +71,25 @@ _Last updated: 2026-05-11_
 | `kubectl` | Cluster management | Installed (`bin/kubectl`, vendored) |
 | `helm` | Phase B registry deploy | Installed (v3.20.2, `/usr/local/bin/helm`) |
 
+## Auth Credentials
+
+Registry basic auth credentials are stored in `~/.turingpi/credentials.kv` (mode 600, gitignored).
+
+```
+# ~/.turingpi/credentials.kv  (key=value, chmod 600)
+REGISTRY_USER=push
+REGISTRY_PASSWORD=<generated on first --enable-auth run>
+```
+
+Run `./scripts/setup-registry.sh --verify` to confirm push/pull with authentication.  
+Run `./scripts/setup-registry.sh --enable-auth` to (re-)apply auth from this file.
+
+containerd mirror config on each node includes the credentials in `/etc/rancher/k3s/registries.yaml`.  
+Mirror endpoint uses the server IP (`192.168.1.11:5000`) so worker nodes don't need hostname DNS for `rk1-node1`.  
+Re-run `./scripts/setup-registry.sh --ca-only` after changing the password to push updated credentials to all nodes.
+
 ## Known Issues
 
 - `turingpi.local` mDNS resolution can fail when only WiFi is available on some networks; fall back to using the static IP `192.168.1.10` directly
-- Phase A registry container was HTTP-only; it has been stopped and replaced by the Phase B HTTPS registry
 - Ubuntu 24.04.1 LTS enforces a mandatory password change on first boot; the bootstrap script handles this automatically via `unlock_expired_password`
-- **Registry auth is currently disabled** — `auth.enabled=false` in the Helm chart (TLS-first approach per ADR-0004). Enable after verifying TLS stability: create an htpasswd Secret and run `helm upgrade` with `--set auth.enabled=true`
-- k3s pod pull from the registry has not yet been smoke-tested end-to-end (laptop `docker push`/`pull` is verified; containerd mirror path is configured but not exercised by a live Pod)
+- Registry PVC is currently backed by eMMC via local-path. Must be moved to SSD (B-09) before Ollama deployment to avoid storage bottleneck.

@@ -755,3 +755,57 @@ the router and/or MetalLB VIPs for services that need stable addresses. Update
 repo.** For Phase B hardening (Tailscale, reverse proxy), rotate default
 `ubuntu`/`ubuntu` credentials and store the new ones in `~/.turingpi/` where
 they are gitignored and user-read-only.
+
+---
+
+## 16. Registry — B-07/B-08 bugs (2026-05-11)
+
+### HostPort + RollingUpdate deadlock
+
+When the registry Deployment uses `strategy: RollingUpdate` (the k8s default) and
+`hostPort: 5000`, the new pod cannot start until the old one is gone — but
+RollingUpdate waits for the new pod to be Ready before killing the old one.
+Result: both ReplicaSets stuck at 0/1, rollout times out.
+
+**Fix:** Set `strategy: type: Recreate` in the Deployment template. Helm will
+kill the old pod first, then start the new one. Applied in `charts/registry/`.
+
+```bash
+# If stuck: rollback to the previous revision, then re-upgrade
+helm rollback registry 1 -n registry
+./scripts/setup-registry.sh --enable-auth
+```
+
+### Phase A Docker registry silently surviving
+
+`stage_stop_old` ran `docker stop registry && docker rm registry` without `sudo`.
+On Ubuntu nodes, `ubuntu` is not in the `docker` group by default, so the command
+failed silently (swallowed by `|| true`). The Phase A `registry:2` container with
+`--restart=always` kept running on port 5000 as an HTTP server, shadowing the
+Phase B HTTPS registry.
+
+Symptom: `curl -sk https://192.168.1.11:5000/v2/` returns nothing; `curl http://...`
+works. `sudo ss -tlnp | grep 5000` shows `docker-proxy` instead of containerd.
+
+**Fix:** `stage_stop_old` now uses `sudo docker stop` / `sudo docker rm`.
+Manual recovery:
+```bash
+ssh ubuntu@192.168.1.11 "sudo docker stop registry && sudo docker rm registry"
+```
+
+### Worker nodes can't resolve `rk1-node1` hostname
+
+containerd `registries.yaml` mirror endpoint was `https://rk1-node1:5000`. Worker
+nodes (rk1-node2/3/4) only have their own hostname in `/etc/hosts`, not other
+nodes'. Result: `lookup rk1-node1: Try again` when pulling.
+
+**Fix:** Use the server's static IP in the endpoint URL:
+```yaml
+mirrors:
+  "rk1-node1:5000":
+    endpoint:
+      - "https://192.168.1.11:5000"
+```
+`install-ca.sh` now derives the server IP from `TPI_BASE_IP_ADDR` in the config
+file and uses it in the endpoint. The `mirrors:` key stays as `rk1-node1:5000`
+to match the image reference as written.

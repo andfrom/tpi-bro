@@ -55,7 +55,8 @@ node_ssh() {
 
 wait_ssh() {
   local ip="$1" timeout_s="$2"
-  local deadline=$(( $(date +%s) + timeout_s ))
+  local deadline
+  deadline=$(( $(date +%s) + timeout_s ))
   while (( $(date +%s) < deadline )); do
     node_ssh "$ip" true &>/dev/null && return 0
     sleep 5
@@ -123,7 +124,8 @@ install_server() {
        --tls-san ${SERVER_IP}"
 
   info "Waiting for k3s server to become active (up to 120s)…"
-  local deadline=$(( $(date +%s) + 120 ))
+  local deadline
+  deadline=$(( $(date +%s) + 120 ))
   while (( $(date +%s) < deadline )); do
     local st
     st=$(node_ssh "$SERVER_IP" "systemctl is-active k3s 2>/dev/null || true")
@@ -179,7 +181,8 @@ install_agents() {
 
 wait_nodes_ready() {
   say "Waiting for all nodes to be Ready (up to 5 min)…"
-  local deadline=$(( $(date +%s) + 300 ))
+  local deadline
+  deadline=$(( $(date +%s) + 300 ))
   while (( $(date +%s) < deadline )); do
     local ready
     ready=$(node_ssh "$SERVER_IP" \

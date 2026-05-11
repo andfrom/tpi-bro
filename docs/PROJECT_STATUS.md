@@ -1,6 +1,6 @@
 # tpi-bro — Project Status
 
-_Last updated: 2026-05-11_
+_Last updated: 2026-05-11 (B-07 auth, B-08 pod pull — done)_
 
 ## Summary
 
@@ -35,7 +35,7 @@ tpi-bro bootstraps a TuringPi 2 board (4× RK1 ARM64 compute modules) from bare 
 
 ## Phase B — k3s + Persistent Registry
 
-**Overall: B0–B2 COMPLETE**
+**Overall: B0–B2 + B-07 + B-08 COMPLETE**
 
 Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Expect script's job ends at A7.
 
@@ -50,19 +50,23 @@ Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Ex
 | B2-ca | CA distributed to all 4 nodes; `registries.yaml` mirror configured; services restarted | `install-ca.sh` (via `setup-registry.sh`) | **Done** 2026-05-11 |
 | B2-laptop | Laptop Docker CA trust automated (idempotent; restarts Docker only when cert changes) | `setup-registry.sh` | **Done** 2026-05-11 |
 | B2-verify | `docker push` + `docker pull` from laptop verified end-to-end | `setup-registry.sh --verify` | **Done** 2026-05-11 |
-| B2-auth | Enable basic auth on registry (`auth.enabled=true` + htpasswd Secret) | manual helm upgrade | **Next** |
-| B3-pod-pull | Test k3s pod pulling from `rk1-node1:5000` (containerd mirror smoke test) | — | TODO |
+| B2-auth | Registry basic auth (`auth.enabled=true` + htpasswd Secret from `~/.turingpi/credentials.kv`) | `setup-registry.sh --enable-auth` | **Done** 2026-05-11 |
+| B2-pod-pull | k3s pod on rk1-node3 pulled `rk1-node1:5000/test:latest` in 505ms via containerd mirror | `kubectl run test-pull …` | **Done** 2026-05-11 |
+| B3-ssd | Mount NVMe SSD on all nodes; move registry PVC from eMMC to SSD (blocker for Ollama) | `scripts/mount-ssd.sh` (TBD) | **Next** |
 | B4-gitops | Argo CD or Flux install + platform repo structure | — | Not started |
 | B5-metallb | MetalLB for stable registry VIP | — | Not started |
 
 ### Running Phase B2
 
 ```bash
-./scripts/setup-registry.sh          # full deploy (idempotent)
-./scripts/setup-registry.sh --verify # test push/pull after deploy
+./scripts/setup-registry.sh                # full deploy (idempotent; also handles CA distribution + laptop Docker trust)
+./scripts/setup-registry.sh --enable-auth  # B-07: create htpasswd secret + helm upgrade with auth.enabled=true
+./scripts/setup-registry.sh --verify       # test authenticated push/pull from laptop
 ```
 
-Prerequisite: `helm` must be installed on the laptop (see `docs/PREREQUISITES.md`). All other steps are automated including laptop Docker CA trust.
+Credentials are in `~/.turingpi/credentials.kv` (mode 600, gitignored). `--enable-auth` reads `REGISTRY_USER` / `REGISTRY_PASSWORD` from that file.
+
+Prerequisite: `helm` must be installed on the laptop (see `docs/PREREQUISITES.md`). All other steps are automated including laptop Docker CA trust and containerd mirror config on all nodes.
 
 ---
 
@@ -84,7 +88,7 @@ Phase B2 complete. All 4 nodes running k3s v1.35.4+k3s1 with containerd 2.2.3. P
 
 | Node | Hostname | Static IP | Status |
 |------|----------|-----------|--------|
-| 1 | rk1-node1 | 192.168.1.11 | k3s server; registry pod running; Docker 29.4.3 (Phase A container stopped) |
+| 1 | rk1-node1 | 192.168.1.11 | k3s server; persistent HTTPS registry running (auth enabled); Phase A Docker container removed |
 | 2 | rk1-node2 | 192.168.1.12 | k3s agent |
 | 3 | rk1-node3 | 192.168.1.13 | k3s agent |
 | 4 | rk1-node4 | 192.168.1.14 | k3s agent |
@@ -99,6 +103,9 @@ IPs, MACs, and other operational details are in `bootstrap-state.kv` (gitignored
 
 ## Immediate Next Steps
 
-1. **Enable registry auth** — create htpasswd Secret and set `auth.enabled=true` via `helm upgrade` (see B2-auth in `mem/backlog/BACKLOG.md`)
-2. **Test k3s pod pull** — deploy a test Pod that pulls from `rk1-node1:5000` to confirm containerd mirror config end-to-end
-3. **Phase B3+** — GitOps controller (Argo CD or Flux), platform repo, MetalLB
+1. **B-09: Mount NVMe SSDs** on all nodes and move the registry PVC from eMMC (`local-path`) to SSD. **Blocker for Ollama deployment.** See `mem/backlog/BACKLOG.md` B-09 for commands.
+2. **Ollama deployment** — one instance per node, weights on local SSD, nodeSelector pinning.
+3. **GitOps controller** — Argo CD or Flux; platform repo structure. User confirmed this should happen before returning to `sibling-app`.
+4. **`sibling-app` Agent A deployment** — initial agent Deployment on node1 after GitOps is in place.
+
+See `docs/DEPLOYMENT_STATUS.md` for the full current cluster state and `mem/backlog/BACKLOG.md` for the ordered backlog.

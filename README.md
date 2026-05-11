@@ -29,14 +29,42 @@ $EDITOR bootstrap-config.kv
 
 # 5. Verify
 ssh ubuntu@rk1-node1 hostname
-curl http://rk1-node1:5000/v2/_catalog
+curl http://rk1-node1:5000/v2/_catalog   # Phase A only — HTTP, ephemeral
 ```
 
-After step 4 you have: 4 named nodes (`rk1-node{1..4}`), SSH access by hostname, and a Docker registry on `rk1-node1:5000`. Phase B (k3s + persistent registry) is next.
+After step 4 you have: 4 named nodes (`rk1-node{1..4}`), SSH access by hostname, and a temporary HTTP Docker registry on `rk1-node1:5000`. **Phase B** replaces this with a persistent, TLS-authenticated registry and installs k3s across all nodes — see [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for current progress and next steps.
 
 **Need to reflash nodes first?** See [Flashing compute modules](#flashing-compute-modules).  
 **BMC firmware out of date?** See [BMC firmware (A0)](#bmc-firmware-a0).  
 **Starting over?** `./scripts/teardown-cluster.exp && ./scripts/bootstrap-turingpi-cluster.exp --phase A`
+
+### Phase B Quick Start (k3s + persistent registry)
+
+Run these once after Phase A completes:
+
+```bash
+# B0: static IPs + SSH key distribution (if not already done)
+./scripts/setup-static-ips.sh
+./scripts/setup-ssh-keys.sh
+
+# B1: install k3s (server on node1, agents on nodes 2–4)
+./scripts/install-k3s.sh
+
+# B2: deploy persistent HTTPS registry
+./scripts/setup-registry.sh           # generates certs, deploys Helm chart, distributes CA to all nodes
+
+# B-07: enable basic auth
+# First time: credentials are auto-generated and saved to ~/.turingpi/credentials.kv
+./scripts/setup-registry.sh --enable-auth
+
+# Verify end-to-end (authenticated push/pull from laptop, pod pull from cluster)
+./scripts/setup-registry.sh --verify
+kubectl run test-pull --image=rk1-node1:5000/test:latest --restart=Never --overrides='{"spec":{"imagePullPolicy":"Always"}}'
+kubectl get pod test-pull -o wide
+kubectl delete pod test-pull
+```
+
+See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for full Phase B status and `docs/PREREQUISITES.md` for tool requirements.
 
 ---
 
@@ -403,8 +431,7 @@ Populate `bmc-manifest.kv` from `bmc-manifest.kv.example` with the firmware URL 
 ```
 
 The CI suite (Suites 1+2, 27 tests) runs automatically in GitHub Actions on every
-push and PR. Suite 3 (hardware) runs manually before significant merges. See
-[docs/TEST_STATUS.md](docs/TEST_STATUS.md) for the full path map and coverage details.
+push and PR. Suite 3 (hardware) runs manually before significant merges.
 
 ---
 
@@ -475,7 +502,7 @@ Once the registry is reachable and each node has a hostname and working SSH, the
 
 Everything after bootstrap is handled declaratively via Kubernetes manifests and GitOps tooling:
 
-**Phase B:** Persistent registry with TLS + auth, mounted SSD storage, CA trust distribution, k3s install across all nodes, containerd mirror configuration.
+**Phase B:** Persistent registry with TLS + basic auth, k3s install across all nodes, CA trust distribution, containerd mirror configuration. **B0–B2 + B-07 (auth) + B-08 (pod pull) are complete** as of 2026-05-11. Next: B-09 (SSD mounting, Ollama blocker), then GitOps, then multi-agent workloads. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
 
 **Phase C:** Local registry mirror + sync from laptop, IP resilience (static DHCP or CoreDNS), cloud expansion notes.
 

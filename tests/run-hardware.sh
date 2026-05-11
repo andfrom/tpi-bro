@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Suite 3 — Hardware verification runner.
+# Suite 3 — Hardware verification runner (Phase A bootstrap/teardown cycles).
 # Requires a live TuringPi 2 with 4× RK1 nodes and a reachable BMC.
+#
+# For Phase B cluster health checks (k3s, registry, pod pull) use Suite 4:
+#   ./tests/check-cluster.sh          # full health check
+#   ./tests/check-cluster.sh --quick  # skip per-node pod pull
 #
 # Usage:
 #   ./tests/run-hardware.sh [OPTIONS]
@@ -93,10 +97,12 @@ verify_cluster_up() {
     fi
   done
 
+  # Phase A registry is HTTP and unauthenticated (Docker container, --restart=always).
+  # Phase B replaces this; run ./tests/check-cluster.sh for Phase B registry checks.
   if curl -sf --connect-timeout 5 http://rk1-node1:5000/v2/_catalog 2>/dev/null | grep -q repositories; then
-    ok "registry HTTP up on rk1-node1:5000"
+    ok "Phase A registry HTTP up on rk1-node1:5000"
   else
-    fail "registry not reachable on rk1-node1:5000"
+    fail "Phase A registry not reachable on rk1-node1:5000"
   fi
 }
 

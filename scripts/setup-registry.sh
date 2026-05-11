@@ -5,12 +5,14 @@
 #   ./setup-registry.sh              # full B2 deploy
 #   ./setup-registry.sh --certs-only # just generate certs
 #   ./setup-registry.sh --ca-only    # just distribute CA to all nodes
-#   ./setup-registry.sh --verify     # test registry push/pull
+#   ./setup-registry.sh --enable-auth # B-07: create htpasswd secret + enable auth
+#   ./setup-registry.sh --verify     # test registry push/pull (with login if auth enabled)
 #   ./setup-registry.sh [--config FILE] [--state FILE]
 set -euo pipefail
 
 CONFIG_FILE="./bootstrap-config.kv"
 STATE_FILE="./bootstrap-state.kv"
+CREDS_FILE="${HOME}/.turingpi/credentials.kv"
 DO_CERTS=1
 DO_STOP_OLD=1
 DO_NAMESPACE=1
@@ -19,18 +21,21 @@ DO_HELM=1
 DO_WAIT=1
 DO_CA=1
 DO_LAPTOP=1
+DO_AUTH=0
 DO_VERIFY=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --config)      CONFIG_FILE="$2"; shift 2 ;;
-    --state)       STATE_FILE="$2";  shift 2 ;;
-    --certs-only)  DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0; DO_HELM=0;
-                   DO_WAIT=0; DO_CA=0; DO_LAPTOP=0; shift ;;
-    --ca-only)     DO_CERTS=0; DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0;
-                   DO_HELM=0; DO_WAIT=0; DO_LAPTOP=0; shift ;;
-    --verify)      DO_CERTS=0; DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0;
-                   DO_HELM=0; DO_WAIT=0; DO_CA=0; DO_LAPTOP=0; DO_VERIFY=1; shift ;;
+    --config)       CONFIG_FILE="$2"; shift 2 ;;
+    --state)        STATE_FILE="$2";  shift 2 ;;
+    --certs-only)   DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0; DO_HELM=0;
+                    DO_WAIT=0; DO_CA=0; DO_LAPTOP=0; shift ;;
+    --ca-only)      DO_CERTS=0; DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0;
+                    DO_HELM=0; DO_WAIT=0; DO_LAPTOP=0; shift ;;
+    --enable-auth)  DO_CERTS=0; DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0;
+                    DO_HELM=0; DO_WAIT=0; DO_CA=0; DO_LAPTOP=0; DO_AUTH=1; shift ;;
+    --verify)       DO_CERTS=0; DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0;
+                    DO_HELM=0; DO_WAIT=0; DO_CA=0; DO_LAPTOP=0; DO_VERIFY=1; shift ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
   esac
 done
@@ -98,7 +103,7 @@ stage_certs() {
 stage_stop_old() {
   say "Removing Phase A Docker registry container on ${SERVER_NODE} (if present)…"
   node_ssh "$SERVER_IP" \
-    "docker stop registry 2>/dev/null || true; docker rm registry 2>/dev/null || true"
+    "sudo docker stop registry 2>/dev/null || true; sudo docker rm registry 2>/dev/null || true"
   info "Done (no-op if container was already gone)."
 }
 
@@ -184,10 +189,58 @@ stage_laptop_docker_trust() {
   info "Done."
 }
 
+# ---- stage: enable-auth -----------------------------------------------------
+
+stage_enable_auth() {
+  say "Enabling registry basic auth (B-07)…"
+  [[ -f "$CREDS_FILE" ]] || err "Credentials file not found: ${CREDS_FILE}"
+
+  local reg_user reg_pass
+  reg_user=$(kv_get REGISTRY_USER     "$CREDS_FILE")
+  reg_pass=$(kv_get REGISTRY_PASSWORD "$CREDS_FILE")
+  [[ -n "$reg_user" ]] || err "REGISTRY_USER not set in ${CREDS_FILE}"
+  [[ -n "$reg_pass" ]] || err "REGISTRY_PASSWORD not set in ${CREDS_FILE}"
+
+  info "Creating htpasswd secret for user '${reg_user}'…"
+  local tmp
+  tmp=$(mktemp)
+  htpasswd -Bbn "$reg_user" "$reg_pass" > "$tmp"
+  kubectl create secret generic registry-htpasswd \
+    -n registry \
+    --from-file=htpasswd="$tmp" \
+    --dry-run=client -o yaml \
+    | kubectl apply -f -
+  rm -f "$tmp"
+
+  info "Upgrading Helm release with auth.enabled=true…"
+  helm upgrade registry "$(dirname "$0")/../charts/registry" \
+    -n registry \
+    --reuse-values \
+    --set auth.enabled=true
+
+  say "Waiting for registry pod to be Ready after upgrade (up to 120s)…"
+  kubectl rollout status deployment/registry -n registry --timeout=120s
+
+  say "Auth enabled. Test with: docker login ${REGISTRY_ADDR}"
+}
+
 # ---- stage: verify ----------------------------------------------------------
 
 stage_verify() {
   say "Verifying registry with a test push/pull…"
+
+  # Log in if auth is enabled (credentials file present and auth secret exists)
+  local authed=0
+  if [[ -f "$CREDS_FILE" ]] && kubectl get secret registry-htpasswd -n registry &>/dev/null; then
+    local reg_user reg_pass
+    reg_user=$(kv_get REGISTRY_USER     "$CREDS_FILE")
+    reg_pass=$(kv_get REGISTRY_PASSWORD "$CREDS_FILE")
+    if [[ -n "$reg_user" && -n "$reg_pass" ]]; then
+      info "Auth detected — logging in to ${REGISTRY_ADDR}…"
+      echo "$reg_pass" | docker login "$REGISTRY_ADDR" -u "$reg_user" --password-stdin
+      authed=1
+    fi
+  fi
 
   local test_image="${REGISTRY_ADDR}/test:latest"
   info "Pulling a small image to use as test payload…"
@@ -203,6 +256,8 @@ stage_verify() {
   info "Cleaning up local test tag…"
   docker rmi "$test_image" || true
 
+  (( authed )) && docker logout "$REGISTRY_ADDR" || true
+
   say "Verify: OK — registry at ${REGISTRY_ADDR} is working."
 }
 
@@ -217,6 +272,7 @@ stage_verify() {
 (( DO_WAIT       )) && stage_wait_pod
 (( DO_CA         )) && stage_ca_distribute
 (( DO_LAPTOP     )) && stage_laptop_docker_trust
+(( DO_AUTH       )) && stage_enable_auth
 (( DO_VERIFY     )) && stage_verify
 
-say "Phase B2 complete."
+say "Done."

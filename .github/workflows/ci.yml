@@ -21,3 +21,40 @@ jobs:
 
       - name: Run CI test suite
         run: ./tests/run-ci.sh
+
+  lint:
+    name: Suite 3 (shellcheck + helm lint, no hardware)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+
+      - name: Install helm
+        run: curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: shellcheck — Phase A helper
+        run: shellcheck --severity=warning scripts/bootstrap-host-helper.sh
+
+      - name: shellcheck — Phase B scripts
+        run: |
+          shellcheck --severity=warning \
+            scripts/setup-static-ips.sh \
+            scripts/setup-ssh-keys.sh \
+            scripts/install-k3s.sh \
+            scripts/gen-registry-certs.sh \
+            scripts/install-ca.sh \
+            scripts/setup-registry.sh
+
+      - name: shellcheck — test runners
+        run: shellcheck --severity=warning tests/run-ci.sh tests/run-hardware.sh tests/check-cluster.sh
+
+      - name: helm lint — registry chart
+        run: helm lint charts/registry/
+
+      - name: helm template — registry chart (verify render)
+        run: helm template test-release charts/registry/ > /dev/null

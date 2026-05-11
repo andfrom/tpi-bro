@@ -4,6 +4,8 @@ metadata:
   name: registry
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels: { app: registry }
   template:
@@ -16,6 +18,9 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: 5000
+              {{- if .Values.service.hostPort }}
+              hostPort: {{ .Values.service.hostPort }}
+              {{- end }}
           env:
             - name: REGISTRY_HTTP_ADDR
               value: ":5000"
@@ -45,6 +50,10 @@ spec:
             limits:
               cpu: {{ .Values.resources.limits.cpu }}
               memory: {{ .Values.resources.limits.memory }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         - name: data
           persistentVolumeClaim:

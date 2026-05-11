@@ -2,21 +2,25 @@
 # Installs the registry CA on one node and configures the k3s containerd mirror.
 #
 # Usage:
-#   ./install-ca.sh <node-ip> [--ca-cert FILE] [--registry ADDR] [--config FILE]
+#   ./install-ca.sh <node-ip> [--ca-cert FILE] [--registry ADDR] [--config FILE] [--creds FILE]
 set -euo pipefail
 
 CONFIG_FILE="./bootstrap-config.kv"
+CREDS_FILE="${HOME}/.turingpi/credentials.kv"
 CA_CERT=""
 REGISTRY_ADDR=""
+REGISTRY_IP=""
 NODE_IP=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --ca-cert)   CA_CERT="$2";       shift 2 ;;
-    --registry)  REGISTRY_ADDR="$2"; shift 2 ;;
-    --config)    CONFIG_FILE="$2";   shift 2 ;;
-    -*)          echo "Unknown flag: $1"; exit 1 ;;
-    *)           NODE_IP="$1";       shift ;;
+    --ca-cert)      CA_CERT="$2";       shift 2 ;;
+    --registry)     REGISTRY_ADDR="$2"; shift 2 ;;
+    --registry-ip)  REGISTRY_IP="$2";   shift 2 ;;
+    --config)       CONFIG_FILE="$2";   shift 2 ;;
+    --creds)        CREDS_FILE="$2";    shift 2 ;;
+    -*)             echo "Unknown flag: $1"; exit 1 ;;
+    *)              NODE_IP="$1";       shift ;;
   esac
 done
 
@@ -56,6 +60,15 @@ fi
 [[ -n "$CA_CERT"        ]] || CA_CERT="./registry-certs/myCA.crt"
 [[ -n "$REGISTRY_ADDR"  ]] || REGISTRY_ADDR="rk1-node${SERVER_IDX}:5000"
 
+# Derive server IP from config if not provided — used for the mirror endpoint URL
+# so worker nodes don't need DNS resolution for rk1-node1.
+if [[ -z "$REGISTRY_IP" && -f "$CONFIG_FILE" ]]; then
+  _base=$(kv_get TPI_BASE_IP_ADDR "$CONFIG_FILE")
+  if [[ -n "$_base" ]]; then
+    REGISTRY_IP=$(ip_add "$_base" "$SERVER_IDX")
+  fi
+fi
+
 [[ -f "$CA_CERT" ]] || err "CA cert not found: $CA_CERT (run gen-registry-certs.sh first)"
 
 # ---- copy CA cert -----------------------------------------------------------
@@ -72,16 +85,34 @@ say "Writing /etc/rancher/k3s/registries.yaml on ${NODE_IP}…"
 node_ssh sudo mkdir -p /etc/rancher/k3s
 
 REG_ADDR="$REGISTRY_ADDR"
+REG_PORT="${REG_ADDR##*:}"
+# Use IP in endpoint URL so worker nodes don't need hostname DNS for rk1-node1
+ENDPOINT_HOST="${REGISTRY_IP:-${REG_ADDR%:*}}"
+ENDPOINT_URL="https://${ENDPOINT_HOST}:${REG_PORT}"
+
+# Build optional auth block from credentials file
+AUTH_BLOCK=""
+if [[ -f "$CREDS_FILE" ]]; then
+  REG_USER=$(kv_get REGISTRY_USER     "$CREDS_FILE")
+  REG_PASS=$(kv_get REGISTRY_PASSWORD "$CREDS_FILE")
+  if [[ -n "$REG_USER" && -n "$REG_PASS" ]]; then
+    info "Adding auth credentials for containerd mirror…"
+    AUTH_BLOCK="    auth:
+      username: ${REG_USER}
+      password: ${REG_PASS}"
+  fi
+fi
 
 node_ssh sudo tee /etc/rancher/k3s/registries.yaml > /dev/null <<EOF
 mirrors:
   "${REG_ADDR}":
     endpoint:
-      - "https://${REG_ADDR}"
+      - "${ENDPOINT_URL}"
 configs:
-  "${REG_ADDR}":
+  "${ENDPOINT_HOST}:${REG_PORT}":
     tls:
       ca_file: "/usr/local/share/ca-certificates/registry-ca.crt"
+${AUTH_BLOCK}
 EOF
 
 # ---- restart k3s or k3s-agent -----------------------------------------------

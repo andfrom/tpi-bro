@@ -33,4 +33,4 @@ Phase A requires a registry that can receive pushed images before k3s is install
 
 ## Notes
 
-Phase B registry is deployed and verified as of 2026-05-11. Auth is currently disabled (`auth.enabled=false`); enable once TLS stability is confirmed (see B-07 in backlog). See ADR-0021 for the TLS/CA approach.
+Phase B registry is deployed, TLS verified, and basic auth enabled as of 2026-05-11 (B-07 done). Credentials in `~/.turingpi/credentials.kv`. containerd mirror on all nodes confirmed via k3s pod pull (B-08 done). See ADR-0021 for the TLS/CA approach.
