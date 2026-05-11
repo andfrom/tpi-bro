@@ -258,3 +258,39 @@ Contribution guide, issue templates, PR checklist.
 
 ### DOC-04: Jetson Orin Nano / CM4 support
 Currently untested. Document gaps once hardware is available.
+
+---
+
+## Research
+
+### R-01: RK3588 NPU acceleration for LLM inference
+**Status:** TODO
+
+The RK3588 has a 6 TOPS NPU per module (24 TOPS across the cluster). Ollama
+does not use it — it falls back to CPU-only inference (~3–8 tok/s for a 3B
+model). The NPU could deliver ~10–20 tok/s for the same model (3–5× speedup),
+bringing inference well inside timeout budgets and making larger models viable.
+
+**Key finding:** Rockchip's official `airockchip/rknn-llm` toolkit supports
+LLM inference on the NPU. Community projects (e.g. `rkllm-server`) wrap it
+with an Ollama-compatible HTTP API, meaning the sibling-app stack (Agent A,
+`OLLAMA_URL`) would not need changes — just swap the inference endpoint.
+
+**What the investigation involves:**
+1. Model conversion — export a GGUF model (e.g. `llama3.2:3b`) to RKNN format
+   using the rknn-llm toolkit on an x86 host; verify output on one RK1 node
+2. Runtime deployment — build or pull a container image with the RKNN runtime
+   + rkllm-server (Ollama-compatible API); deploy as a Kubernetes Deployment
+   on an NVMe node with the RKNN device node (`/dev/rknpu`) mounted
+3. Benchmark — compare tokens/second and end-to-end scoring latency vs. current
+   CPU-only Ollama baseline; confirm < 120 s per inference at concurrency 3
+4. Rollout — if viable, deploy alongside Ollama as an opt-in endpoint
+   (`OLLAMA_URL` → rkllm-server ClusterIP); Ollama stays as fallback
+
+**Constraints / risks:**
+- RKNN-LLM model support is limited (Llama, Qwen, Phi families confirmed;
+  others need testing)
+- Model conversion requires x86 host with the rknn-llm conda environment
+- `/dev/rknpu` device must be exposed to the pod via `hostPath` volume +
+  privileged security context (or a device plugin)
+- The Mali G610 GPU is NOT useful for this — NPU only
