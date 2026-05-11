@@ -140,9 +140,8 @@ Document how to federate the local cluster with a cloud K8s cluster (e.g., for G
 **Status:** DONE (2026-05-11)  
 `scripts/deploy-agent-a.sh` — builds linux/arm64 image on laptop via QEMU + docker buildx (docker-container driver), pushes to cluster registry, applies `sibling-app/infra/k8s/agent-a.yaml`. Namespace `sibling-app`, Deployment + ClusterIP Service on port 18090. `OLLAMA_URL=http://ollama-node1.ollama:11434`. No node pin (stateless). `model.cfg` updated to `llama3.2:3b`.
 
-### D-03: Ingress controller
-**Status:** TODO  
-Install Traefik (bundled with k3s) or Nginx ingress. Route `/agent-a/` to Agent A, etc.
+### D-03: Ingress / service exposure
+**Status:** TODO — superseded in priority by N-01 (Tailscale mesh). Revisit after N-01; Tailscale operator may cover all ingress needs for this use case.
 
 ### D-04: Observability baseline
 **Status:** TODO  
@@ -150,20 +149,47 @@ Prometheus + Grafana via kube-prometheus-stack Helm chart. Basic dashboards: CPU
 
 ---
 
+## Network Layer
+
+### N-01: Tailscale mesh — cluster as seamless network extension
+**Status:** TODO — **next priority after D-02**
+
+Tailscale is not just remote access. It is the network substrate that makes every application on the laptop interact with the cluster without port-forwarding, without `kubectl` tunnels, without knowing about home router topology or NAT. The cluster becomes a seamless extension of the laptop for any process.
+
+**Three layers, each independently valuable:**
+
+**Layer 1 — Node mesh (30 min)**  
+Install `tailscale` on all 4 nodes and the laptop. Every device gets a stable Tailscale IP and a MagicDNS hostname (`rk1-node1.your-tailnet.ts.net`) that never changes. Works from home, coffee shop, CI runner, anywhere.
+
+- `OLLAMA_URL=http://rk1-node1.your-tailnet.ts.net:11434` in `.env` — no port-forward ever again
+- `kubectl` over Tailscale IP — no `port-forward`, kubeconfig just works
+- NodePort services directly reachable by name
+
+**Layer 2 — Subnet routing (15 min)**  
+One node advertises the k3s cluster CIDR (`10.43.0.0/16`) as a Tailscale subnet route. Every ClusterIP service becomes directly routable from the laptop — no NodePort needed, in-cluster DNS names become reachable from outside.
+
+**Layer 3 — Tailscale Kubernetes operator (1–2 h)**  
+The operator watches for annotated Services and exposes each as its own Tailscale device with a stable DNS name. Annotate a Service with `tailscale.com/expose: "true"` and it appears at `agent-a.your-tailnet.ts.net` — no ingress controller, no port-forward, no kubectl. Any app on any Tailnet device calls it directly by name.
+
+- Deploying a new agent = one annotation; it appears on the Tailnet automatically
+- This replaces D-03 (ingress controller) for this use case
+- CI pipelines, mobile, scripts, other applications — all call services by stable name
+
+**End state:** `sibling-app score` from anywhere, any app talks to any service by name, new agents self-advertise. The orchestration layer has zero network topology knowledge.
+
+**Implementation order:** Layer 1 → Layer 2 → Layer 3. Each layer is usable standalone.
+
+**Scripts needed:**
+- `scripts/install-tailscale.sh` — installs + authenticates tailscaled on all 4 nodes (auth key from `~/.turingpi/credentials.kv`)
+- `scripts/setup-subnet-router.sh` — enables subnet route advertisement on node1, approves in Tailscale admin
+- Helm chart or manifest for Tailscale operator in k3s
+
+---
+
 ## Security & Hardening (Future)
 
 ### S-01: Internal HTTPS ingress
-Node-port exposure is not suitable for production traffic. Add Traefik + cert-manager (Let's Encrypt or self-signed) for HTTPS ingress routing inside the cluster.
-
-### S-04: External remote access (Tailscale / reverse proxy)
-**Status:** TODO  
-Accessing the cluster from outside the home LAN (e.g. from a laptop on a different network) requires either a VPN mesh or a cloud-fronted reverse proxy. Options:
-
-- **Tailscale** (recommended): install the Tailscale agent on each node and the laptop; the cluster becomes reachable at stable Tailscale IPs regardless of home network topology or NAT. Zero port forwarding required. Free for personal use; ARM64 Ubuntu supported.
-- **WireGuard**: self-hosted alternative if Tailscale dependency is undesirable.
-- **Cloud reverse proxy**: a small VPS running nginx/caddy with TLS termination, forwarding to the cluster over a persistent tunnel. More control, more ops overhead.
-
-This is a prerequisite for running `sibling-app` agents from a mobile context or CI pipelines outside the home network.
+**Status:** SUPERSEDED by N-01. Tailscale operator provides TLS-terminated ingress per service without a separate ingress controller.
 
 ### S-02: Multi-tenancy / user compartmentalization
 SSD volume isolation per user. Not needed until multiple users share the cluster.
