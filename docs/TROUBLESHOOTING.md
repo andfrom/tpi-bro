@@ -19,10 +19,12 @@ full bootstrap sessions. Ordered roughly by the phase where each issue appears.
 10. [TLS / certificates](#10-tls--certificates)
 11. [k3s / Kubernetes](#11-k3s--kubernetes)
 12. [Phase B2 setup-registry.sh](#12-phase-b2-setup-registrysh)
-12. [Registry — Phase A (HTTP)](#12-registry--phase-a-http)
-13. [Registry — Phase B (TLS + auth)](#13-registry--phase-b-tls--auth)
-14. [Expect script / bootstrap automation](#14-expect-script--bootstrap-automation)
-15. [General lessons learned](#15-general-lessons-learned)
+13. [Registry — Phase A (HTTP)](#13-registry--phase-a-http)
+14. [Registry — Phase B (TLS + auth)](#14-registry--phase-b-tls--auth)
+15. [Phase B orchestrator and interactive prompts](#15-phase-b-orchestrator-and-interactive-prompts)
+16. [Expect script / bootstrap automation](#16-expect-script--bootstrap-automation)
+17. [General lessons learned](#17-general-lessons-learned)
+18. [Registry — B-07/B-08 bugs (2026-05-11)](#18-registry--b-07b-08-bugs-2026-05-11)
 
 ---
 
@@ -580,7 +582,7 @@ kubectl create secret <name> ...
 
 ---
 
-## 12. Registry — Phase A (HTTP)
+## 13. Registry — Phase A (HTTP)
 
 ### All clients must opt in to insecure registry
 
@@ -605,7 +607,7 @@ containerd to attempt TLS.
 
 ---
 
-## 13. Registry — Phase B (TLS + auth)
+## 14. Registry — Phase B (TLS + auth)
 
 ### Registry is open to LAN by default
 
@@ -663,7 +665,68 @@ Keep secret names consistent with the chart's `values.yaml` (`tls.secretName`,
 
 ---
 
-## 14. Expect script / bootstrap automation
+## 15. Phase B orchestrator and interactive prompts
+
+### What `bootstrap-phase-b.sh` does and what it doesn't do
+
+`bootstrap-phase-b.sh` runs all Phase B stages (B0–B2) in order and halts on failure
+with a re-run instruction. It supports `--dry-run`, `--from STAGE`, `--to STAGE`, and
+`--check` (runs `tests/check-cluster.sh` after B2_verify).
+
+Stages: `B0_static_ips` → `B0_ssh_keys` → `B1_k3s` → `B2_registry` → `B2_auth` → `B2_verify`.
+
+```bash
+./scripts/bootstrap-phase-b.sh --dry-run       # preview all actions, no changes
+./scripts/bootstrap-phase-b.sh                 # full run
+./scripts/bootstrap-phase-b.sh --from B1_k3s  # skip B0 (already done), start from k3s
+./scripts/bootstrap-phase-b.sh --check        # run + health check at the end
+```
+
+### Password prompts in B0 stages
+
+Both B0 stages prompt interactively and cannot be run fully unattended. This is
+intentional: at the start of B0 there is no SSH key auth yet, so the node Ubuntu
+login password is the only credential available.
+
+**`B0_static_ips` (`setup-static-ips.sh`):**
+- Shows the IP assignment plan and waits for `Enter` to confirm before making changes.
+- Prompts for the **BMC root password** (avoidable: set `BMC_PASS` in `bootstrap-config.kv`).
+- Prompts for the **node Ubuntu password** (the `NEW_PASS` set during Phase A). No config fallback.
+
+**`B0_ssh_keys` (`setup-ssh-keys.sh`):**
+- Prompts for the **node Ubuntu password** again to distribute the SSH public key via `sshpass`.
+
+After `B0_ssh_keys` completes, all subsequent stages use key-based SSH and are fully
+non-interactive. The node password is no longer needed after this point.
+
+### The node password prompt appears, but the nodes aren't reachable
+
+The B0 scripts connect to node IPs stored in `bootstrap-state.kv`. If the IPs have
+drifted (DHCP reassignment after a reboot), the connection will time out.
+
+**Fix:** Run `--rediscover` in the Phase A Expect script first to update the state file:
+```bash
+./scripts/bootstrap-turingpi-cluster.exp --rediscover
+```
+Then re-run the Phase B orchestrator from `B0_static_ips`.
+
+Once B0 is complete, static IPs are configured and DHCP drift is no longer a concern.
+
+### Orchestrator halts mid-run and says to use `--from`
+
+Each stage calls the underlying script with `set -euo pipefail`. Any non-zero exit
+causes the orchestrator to print:
+```
+ERROR: stage B2_registry failed.
+Fix the issue then re-run with:  ./bootstrap-phase-b.sh --from B2_registry
+```
+
+The failed stage and everything after it is not re-run automatically. Fix the root
+cause (check the output above the error line), then re-run with `--from`.
+
+---
+
+## 16. Expect script / bootstrap automation
 
 ### Prompt patterns: never use `$` end-of-line anchor
 
@@ -728,7 +791,7 @@ without `--phase` to resume from a specific stage:
 
 ---
 
-## 15. General lessons learned
+## 17. General lessons learned
 
 **Use Expect only for out-of-band bootstrap operations.** Expect is right for
 one-time interactive tasks: BMC power, initial SSH, password changes, node
@@ -758,7 +821,7 @@ they are gitignored and user-read-only.
 
 ---
 
-## 16. Registry — B-07/B-08 bugs (2026-05-11)
+## 18. Registry — B-07/B-08 bugs (2026-05-11)
 
 ### HostPort + RollingUpdate deadlock
 
@@ -809,3 +872,23 @@ mirrors:
 `install-ca.sh` now derives the server IP from `TPI_BASE_IP_ADDR` in the config
 file and uses it in the endpoint. The `mirrors:` key stays as `rk1-node1:5000`
 to match the image reference as written.
+
+### Pod pull check showed `Error` phase even though the image was pulled
+
+`kubectl get pod test-pull` showed phase `Error` (exit code 1 from the alpine
+container). Waiting for `Succeeded` phase would never succeed because alpine's
+default entrypoint returns non-zero when invoked with no arguments.
+
+**The image was actually pulled correctly.** The containerd mirror path was
+working — `Pulled` appears in the events. The pod failure is unrelated to the
+pull.
+
+**Fix:** Check for the `"Successfully pulled image"` event in `kubectl describe`,
+not pod phase:
+```bash
+kubectl describe pod test-pull | grep -i "pulled"
+# Normal: "Successfully pulled image "rk1-node1:5000/test:latest" in 505ms"
+```
+
+`tests/check-cluster.sh` checks C07–C10 use `grep "Successfully pulled"` on
+`kubectl describe` output for exactly this reason.

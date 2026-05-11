@@ -52,21 +52,64 @@ Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Ex
 | B2-verify | `docker push` + `docker pull` from laptop verified end-to-end | `setup-registry.sh --verify` | **Done** 2026-05-11 |
 | B2-auth | Registry basic auth (`auth.enabled=true` + htpasswd Secret from `~/.turingpi/credentials.kv`) | `setup-registry.sh --enable-auth` | **Done** 2026-05-11 |
 | B2-pod-pull | k3s pod on rk1-node3 pulled `rk1-node1:5000/test:latest` in 505ms via containerd mirror | `kubectl run test-pull …` | **Done** 2026-05-11 |
-| B3-ssd | Mount NVMe SSD on all nodes; move registry PVC from eMMC to SSD (blocker for Ollama) | `scripts/mount-ssd.sh` (TBD) | **Next** |
+| B3-ssd | Mount NVMe SSD on all nodes; move registry PVC from eMMC to SSD (blocker for Ollama) | manual (see BACKLOG.md B-09) | **Next** |
 | B4-gitops | Argo CD or Flux install + platform repo structure | — | Not started |
 | B5-metallb | MetalLB for stable registry VIP | — | Not started |
 
-### Running Phase B2
+### Running Phase B (orchestrated)
+
+The preferred way to run Phase B is the orchestrator, which runs all stages in
+order with `--from`/`--to` resume support and `--dry-run`:
 
 ```bash
-./scripts/setup-registry.sh                # full deploy (idempotent; also handles CA distribution + laptop Docker trust)
-./scripts/setup-registry.sh --enable-auth  # B-07: create htpasswd secret + helm upgrade with auth.enabled=true
-./scripts/setup-registry.sh --verify       # test authenticated push/pull from laptop
+# Dry-run — print every action, touch nothing
+./scripts/bootstrap-phase-b.sh --dry-run
+
+# Full run: B0 (static IPs + SSH keys) → B1 (k3s) → B2 (registry + auth + verify)
+./scripts/bootstrap-phase-b.sh
+
+# Resume after a failure
+./scripts/bootstrap-phase-b.sh --from B2_registry
+
+# Run full suite and finish with the 10-check health test
+./scripts/bootstrap-phase-b.sh --check
 ```
+
+**Interactive prompts (B0 only):**
+- `setup-static-ips.sh` prompts for the BMC root password and the Ubuntu node
+  password (the password set during Phase A). There is also a "Press Enter to
+  confirm" gate before IP changes are applied.
+- `setup-ssh-keys.sh` prompts for the Ubuntu node password again to distribute the
+  SSH public key. After this step, key-based auth is in place and no further
+  password prompts occur.
+
+All stages from B1 onward are fully non-interactive.
+
+### Running individual Phase B scripts
+
+Individual scripts remain usable when you need to re-run a single step:
+
+```bash
+./scripts/setup-registry.sh                # full B2 deploy (idempotent)
+./scripts/setup-registry.sh --enable-auth  # create htpasswd secret + upgrade with auth.enabled=true
+./scripts/setup-registry.sh --verify       # test authenticated push/pull from laptop
+./scripts/install-ca.sh <node-ip>          # re-distribute CA to one node
+```
+
+Every Phase B script supports `--dry-run`.
 
 Credentials are in `~/.turingpi/credentials.kv` (mode 600, gitignored). `--enable-auth` reads `REGISTRY_USER` / `REGISTRY_PASSWORD` from that file.
 
 Prerequisite: `helm` must be installed on the laptop (see `docs/PREREQUISITES.md`). All other steps are automated including laptop Docker CA trust and containerd mirror config on all nodes.
+
+### Cluster health check (Suite 4)
+
+```bash
+./tests/check-cluster.sh          # 10 checks: nodes Ready, registry pod, TLS, auth, push, per-node pod pull
+./tests/check-cluster.sh --quick  # skip pod-pull checks (C07–C10)
+```
+
+Exit 0 only if all enabled checks pass.
 
 ---
 

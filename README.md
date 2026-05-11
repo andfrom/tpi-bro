@@ -40,31 +40,39 @@ After step 4 you have: 4 named nodes (`rk1-node{1..4}`), SSH access by hostname,
 
 ### Phase B Quick Start (k3s + persistent registry)
 
-Run these once after Phase A completes:
+Run once after Phase A completes. The orchestrator handles B0 through B2 in order:
 
 ```bash
-# B0: static IPs + SSH key distribution (if not already done)
-./scripts/setup-static-ips.sh
-./scripts/setup-ssh-keys.sh
+# Dry-run first — prints every action, touches nothing
+./scripts/bootstrap-phase-b.sh --dry-run
 
-# B1: install k3s (server on node1, agents on nodes 2–4)
-./scripts/install-k3s.sh
-
-# B2: deploy persistent HTTPS registry
-./scripts/setup-registry.sh           # generates certs, deploys Helm chart, distributes CA to all nodes
-
-# B-07: enable basic auth
-# First time: credentials are auto-generated and saved to ~/.turingpi/credentials.kv
-./scripts/setup-registry.sh --enable-auth
-
-# Verify end-to-end (authenticated push/pull from laptop, pod pull from cluster)
-./scripts/setup-registry.sh --verify
-kubectl run test-pull --image=rk1-node1:5000/test:latest --restart=Never --overrides='{"spec":{"imagePullPolicy":"Always"}}'
-kubectl get pod test-pull -o wide
-kubectl delete pod test-pull
+# Full run (B0 → B2: static IPs, SSH keys, k3s, registry, auth, verify)
+./scripts/bootstrap-phase-b.sh
 ```
 
-See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for full Phase B status and `docs/PREREQUISITES.md` for tool requirements.
+**You will be prompted twice during B0:** once for the BMC root password (for
+static IP configuration) and once for the Ubuntu node password set during Phase A
+(for SSH key distribution). Both are interactive by design — this is the bootstrap
+phase where key-based auth doesn't exist yet. After B0, everything is fully
+automated.
+
+```bash
+# Resume from a specific stage if something failed
+./scripts/bootstrap-phase-b.sh --from B2_registry
+
+# Run the full suite and finish with a 10-check cluster health test
+./scripts/bootstrap-phase-b.sh --check
+
+# Individual scripts are still usable directly (e.g. to re-run one stage)
+./scripts/setup-registry.sh --verify
+```
+
+Credentials for the registry are stored in `~/.turingpi/credentials.kv` (mode 600,
+gitignored). See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for full Phase B
+status and `docs/PREREQUISITES.md` for tool requirements.
+
+**What is not yet automated:** B-09 (NVMe SSD mounting) requires manual steps per
+node before Ollama can be deployed. See `mem/backlog/BACKLOG.md` B-09 for commands.
 
 ---
 
@@ -165,6 +173,7 @@ Stages A1 and A6 update `/etc/hosts` on your laptop (A1 pins the BMC, A6 pins th
 | `scripts/gen-registry-certs.sh` | Phase B2: generate TLS certificates for the registry |
 | `scripts/install-ca.sh` | Phase B2: install CA cert + containerd mirror config on a node |
 | `scripts/setup-registry.sh` | Phase B2: full orchestration — certs → chart deploy → CA distribute |
+| `scripts/bootstrap-phase-b.sh` | Phase B orchestrator — runs B0→B2 in order; `--from`/`--to` resume; `--dry-run`; `--check` |
 | `charts/registry/` | Helm chart for the persistent Phase B registry |
 | `bin/kubectl` | Vendored `kubectl` binary pinned to the cluster version |
 | `bootstrap-state.kv` | Generated state file — discovered IPs, MACs, BMC address (gitignored) |
@@ -172,8 +181,9 @@ Stages A1 and A6 update `/etc/hosts` on your laptop (A1 pins the BMC, A6 pins th
 | `bootstrap-config.kv.example` | Template documenting all config variables |
 | `images-manifest.kv.example` | Template for `--flash download` image manifest |
 | `bmc-manifest.kv.example` | Template for A0 BMC firmware check/upgrade |
-| `tests/run-ci.sh` | CI test runner — Suites 1+2, no hardware required |
-| `tests/run-hardware.sh` | Hardware test runner — Suite 3, full cluster cycles |
+| `tests/run-ci.sh` | CI test runner — Suites 1+2 (Phase A dry-run + mock), no hardware required |
+| `tests/run-hardware.sh` | Hardware test runner — Suite 3, full Phase A cluster cycles |
+| `tests/check-cluster.sh` | Suite 4: 10-check cluster health test (Phase B); `--quick` skips pod-pull checks |
 | `docs/` | PREREQUISITES, TROUBLESHOOTING, and status documents |
 | `mem/adr/` | Architecture Decision Records |
 
@@ -428,10 +438,15 @@ Populate `bmc-manifest.kv` from `bmc-manifest.kv.example` with the firmware URL 
 ./tests/run-hardware.sh --cycles 2          # two bootstrap→teardown cycles on real hardware
 ./tests/run-hardware.sh --flash-cycle       # also run a download-flash cycle
 ./tests/run-hardware.sh --bmc-check         # include A0 BMC version check
+
+# Phase B cluster health check (requires a running cluster)
+./tests/check-cluster.sh                    # 10 checks: nodes, registry, TLS, auth, push, pod pull
+./tests/check-cluster.sh --quick            # skip pod-pull checks (faster)
 ```
 
-The CI suite (Suites 1+2, 27 tests) runs automatically in GitHub Actions on every
-push and PR. Suite 3 (hardware) runs manually before significant merges.
+The CI suite (Suites 1+2 + shellcheck/helm lint, no hardware) runs automatically in
+GitHub Actions on every push and PR. Suite 3 (hardware) and Suite 4 (cluster health)
+run manually.
 
 ---
 
