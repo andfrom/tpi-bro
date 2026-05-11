@@ -196,6 +196,122 @@ Exposes individual services on the Tailnet by name. Requires an OAuth client:
 
 ---
 
+## D-04: Monitoring (Prometheus + Grafana)
+
+The monitoring stack runs entirely on the cluster. Once deployed, Grafana is
+accessible from any device on your Tailnet by name — no port-forwarding, no
+`kubectl proxy`. This section walks you through deploy to your first dashboard.
+
+**Prerequisite:** N-01 Layer 3 (Tailscale Kubernetes operator) must be running
+before you deploy. The install script automatically annotates Grafana for Tailnet
+exposure; without the operator, that annotation has no effect.
+
+### Step 1 — Set a Grafana admin password
+
+Add the password to `~/.turingpi/credentials.kv` (mode 600). Pick anything you
+like — the script reads it at deploy time and passes it directly to Helm:
+
+```bash
+echo "GRAFANA_ADMIN_PASSWORD=your-password-here" >> ~/.turingpi/credentials.kv
+chmod 600 ~/.turingpi/credentials.kv
+```
+
+### Step 2 — Deploy the stack
+
+```bash
+./scripts/install-monitoring.sh
+```
+
+This takes 3–5 minutes. The script:
+- Adds the `prometheus-community` Helm repo
+- Installs `kube-prometheus-stack` (Prometheus, Grafana, Alertmanager,
+  node-exporter on every node, kube-state-metrics)
+- Annotates the Grafana service so the Tailscale operator exposes it on your Tailnet
+
+When it finishes you'll see a line like:
+```
+==> Done.
+    Grafana: http://monitoring-kube-prometheus-stack-grafana.<tailnet>.ts.net:80
+```
+
+### Step 3 — Find your real Grafana URL
+
+The `<tailnet>` placeholder is your Tailscale network's unique name. Look it up
+in one of these ways:
+
+```bash
+# Option A — check tailscale status on your laptop (look for the domain suffix)
+tailscale status | head -5
+
+# Option B — check the Tailscale admin console
+# https://login.tailscale.com/admin/machines
+# Your tailnet name appears after the dot in every hostname, e.g. "tailXXXXX.ts.net"
+
+# Option C — ask kubectl what hostname the operator assigned
+kubectl get svc kube-prometheus-stack-grafana -n monitoring \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+```
+
+Your URL will look like:
+```
+http://monitoring-kube-prometheus-stack-grafana.tailXXXXX.ts.net
+```
+
+### Step 4 — Open Grafana and log in
+
+Open the URL in your browser. You'll land on the Grafana login page.
+
+- **Username:** `admin`
+- **Password:** whatever you set in Step 1 (`GRAFANA_ADMIN_PASSWORD`)
+
+After logging in, Grafana may prompt you to change the password — you can skip
+this if you prefer to keep managing it through `credentials.kv`.
+
+### Step 5 — Navigate to the pre-loaded dashboards
+
+Three dashboards are provisioned automatically from grafana.com and available
+immediately after deploy:
+
+| Dashboard | What it shows |
+|-----------|---------------|
+| **Node Exporter Full** | Per-node CPU, RAM, disk I/O, network — the most detailed node view |
+| **Kubernetes Cluster Overview** | Pod counts, resource requests vs limits, cluster-level health |
+| **k3s Cluster** | k3s-specific metrics (API server, etcd SQLite, scheduler) |
+
+To find them:
+
+1. Click the **Dashboards** icon in the left sidebar (four squares)
+2. Select **Browse**
+3. All three dashboards are in the **default** folder — click any to open it
+
+> **Tip:** The Node Exporter Full dashboard has a **node** dropdown at the top.
+> Select each of `rk1-node1` through `rk1-node4` in turn to inspect individual
+> nodes. Node 4 (no NVMe) will show lower disk throughput than nodes 1–3.
+
+### Step 6 — Set the time range
+
+Dashboards default to the last 1 hour. If the cluster was just deployed, you may
+see sparse data — give Prometheus 5–10 minutes to scrape enough samples for
+graphs to fill in. Use the time picker (top-right) to zoom in on recent activity.
+
+### Step 7 — Verify all components are healthy
+
+```bash
+./scripts/install-monitoring.sh --verify
+```
+
+This shows the running Deployments, StatefulSets, DaemonSets, PVCs, and the
+Grafana Tailnet service. Expect to see:
+
+- **alertmanager** StatefulSet: 1/1
+- **prometheus** StatefulSet: 1/1
+- **grafana** Deployment: 1/1
+- **kube-state-metrics** Deployment: 1/1
+- **node-exporter** DaemonSet: 4 desired / 4 ready (one per node)
+- Three PVCs in `Bound` state (Prometheus 20Gi, Grafana 5Gi, Alertmanager 2Gi)
+
+---
+
 ## Distribution support
 
 | OS | Phase A | Phase B | Notes |
