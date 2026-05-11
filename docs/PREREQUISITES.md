@@ -90,6 +90,103 @@ sudo usermod -aG docker "$USER"   # then log out and back in
 
 ---
 
+## Network Layer (N-01: Tailscale)
+
+Tailscale makes the cluster a seamless network extension of the laptop — no
+port-forwarding, stable DNS names for every service. Three manual steps are
+required before running the scripts; everything else is automated.
+
+### Step 1 — Create a Tailscale account and install on the laptop
+
+Tailscale's onboarding requires at least two devices before you can access the
+admin console. Install on the laptop first (device 1):
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up   # opens a browser tab to log in / create an account
+```
+
+The second device is added in Step 2.
+
+### Step 2 — Add node1 manually (satisfies the "second device" onboarding requirement)
+
+Until you have an auth key, the first node must be added interactively:
+
+```bash
+ssh ubuntu@192.168.1.11 "curl -fsSL https://tailscale.com/install.sh | sudo sh && sudo tailscale up"
+```
+
+This prints a `https://login.tailscale.com/a/...` URL — open it in a browser to
+authenticate node1. Tailscale onboarding then completes and you gain access to
+the admin console. Nodes 2–4 are added automatically by the script in Step 4.
+
+### Step 3 — Generate a Reusable pre-authorized auth key
+
+Go to **<https://login.tailscale.com/admin/settings/keys>** → **Generate auth key**.
+
+> **IMPORTANT:** Tick **Reusable** (default is Single-use — a single-use key is
+> consumed on the first node and will fail for all subsequent nodes). Also tick
+> **Pre-authorized** so nodes join without needing manual approval.
+
+Set expiry to whatever maximum is available (90 days on the free tier). The key
+is only used once per node to join the Tailnet — after that, devices stay
+authenticated independently and can have their key expiry disabled per-device.
+
+Add the key to `~/.turingpi/credentials.kv` (mode 600):
+
+```bash
+echo "TAILSCALE_AUTH_KEY=tskey-auth-..." >> ~/.turingpi/credentials.kv
+```
+
+### Step 4 — Run the install script (nodes 2–4)
+
+```bash
+./scripts/install-tailscale.sh   # installs on all nodes; skips node1 if already installed
+```
+
+### Step 5 — Disable device key expiry (optional but recommended)
+
+In the Tailscale admin console, for each of the 4 nodes:
+**Machines → click node → Disable key expiry**
+
+This prevents nodes from being kicked off the Tailnet after 180 days without
+any maintenance.
+
+### Step 6 — Subnet routing (Layer 2)
+
+Makes all ClusterIP services directly routable from the laptop:
+
+```bash
+./scripts/setup-subnet-router.sh
+```
+
+Then approve the advertised routes in the admin console:
+**Machines → rk1-node1 → Edit route settings → enable both routes**
+
+And on the laptop:
+```bash
+sudo tailscale up --accept-routes
+```
+
+### Step 7 — Tailscale Kubernetes operator (Layer 3)
+
+Exposes individual services on the Tailnet by name. Requires an OAuth client:
+
+1. Go to **<https://login.tailscale.com/admin/settings/oauth>** → **Generate OAuth client**
+2. Scopes: `devices:write` (required), `dns:read` (for MagicDNS)
+3. Add to `~/.turingpi/credentials.kv`:
+   ```
+   TAILSCALE_OAUTH_CLIENT_ID=<id>
+   TAILSCALE_OAUTH_CLIENT_SECRET=<secret>
+   ```
+4. Deploy:
+   ```bash
+   ./scripts/setup-tailscale-operator.sh
+   ./scripts/setup-tailscale-operator.sh --expose svc/agent-a -n sibling-app
+   ```
+
+---
+
 ## Distribution support
 
 | OS | Phase A | Phase B | Notes |

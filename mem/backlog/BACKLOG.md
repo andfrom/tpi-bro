@@ -179,6 +179,8 @@ The operator watches for annotated Services and exposes each as its own Tailscal
 
 **Implementation order:** Layer 1 → Layer 2 → Layer 3. Each layer is usable standalone.
 
+**Key gotcha:** Auth key must be **Reusable** + **Pre-authorized**. The default in the Tailscale admin is Single-use — a single-use key is silently consumed on the first node and fails for all subsequent ones. See `docs/PREREQUISITES.md` N-01 section for the full manual setup sequence.
+
 **Scripts:**
 - `scripts/install-tailscale.sh` — installs + authenticates tailscaled on all 4 nodes; `--status` to inspect
 - `scripts/setup-subnet-router.sh` — enables IP forwarding on node1, advertises k3s CIDRs; requires manual route approval in Tailscale admin
