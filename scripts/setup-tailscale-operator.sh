@@ -70,7 +70,7 @@ if [[ -n "$EXPOSE_SVC" ]]; then
     info "[dry-run] Would: kubectl annotate svc ${svc_name} -n ${EXPOSE_NS} tailscale.com/expose=true"
   else
     kubectl annotate svc "$svc_name" -n "$EXPOSE_NS" tailscale.com/expose=true --overwrite
-    info "Done. Device will appear at: http://${svc_name}.<tailnet>.ts.net"
+    info "Done. Device will appear at: http://${EXPOSE_NS}-${svc_name}.<tailnet>.ts.net"
     info "Check status: kubectl get svc -n ${EXPOSE_NS} ${svc_name}"
   fi
   exit 0
@@ -114,7 +114,8 @@ say "Done."
 info ""
 info "Expose services on the Tailnet:"
 info "  ./scripts/setup-tailscale-operator.sh --expose svc/agent-a -n sibling-app"
-info "  → accessible at http://agent-a.<tailnet>.ts.net:18090"
+info "  → accessible at http://sibling-app-agent-a.<tailnet>.ts.net:18090"
+info "  (operator names devices as <namespace>-<service>)"
 info ""
 info "Or annotate directly:"
 info "  kubectl annotate svc <name> -n <namespace> tailscale.com/expose=true"

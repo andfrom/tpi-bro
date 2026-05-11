@@ -66,7 +66,7 @@ Check live IPs with `tailscale status` or at <https://login.tailscale.com/admin/
 
 Subnet routes `10.42.0.0/16` (pods) and `10.43.0.0/16` (services) advertised by node1 and approved in Tailscale admin. Laptop runs `tailscale up --accept-routes`. All ClusterIP services are directly routable from the laptop — no port-forwarding required.
 
-Layer 3 (Tailscale Kubernetes operator) deployed in namespace `tailscale`. `agent-a` exposed as `agent-a.<tailnet>.ts.net:18090`. Add more services with `./scripts/setup-tailscale-operator.sh --expose svc/NAME -n NAMESPACE`.
+Layer 3 (Tailscale Kubernetes operator) deployed in namespace `tailscale`. `agent-a` exposed as `sibling-app-agent-a.<tailnet>.ts.net:18090` (operator names devices as `<namespace>-<service>`). Add more services with `./scripts/setup-tailscale-operator.sh --expose svc/NAME -n NAMESPACE`.
 
 ## Registry TLS Cert Status
 
