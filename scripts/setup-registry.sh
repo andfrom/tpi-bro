@@ -26,12 +26,14 @@ DO_AUTH=0
 DO_VERIFY=0
 DO_MIGRATE_PVC=0
 DRY=0
+YES=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --config)       CONFIG_FILE="$2"; shift 2 ;;
     --state)        STATE_FILE="$2";  shift 2 ;;
     --dry-run)      DRY=1;            shift   ;;
+    --yes)          YES=1;            shift   ;;
     --certs-only)   DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0; DO_HELM=0;
                     DO_WAIT=0; DO_CA=0; DO_LAPTOP=0; shift ;;
     --ca-only)      DO_CERTS=0; DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0;
@@ -290,9 +292,13 @@ stage_migrate_pvc() {
   say "WARNING: existing registry data (pushed images) will be deleted."
   echo "  The registry secrets (TLS + auth) are preserved."
   echo "  Re-push any images you need after this step."
-  echo
-  echo "Press Enter to continue or Ctrl-C to abort."
-  read -r
+  if (( YES )); then
+    say "--yes: skipping confirmation."
+  else
+    echo
+    echo "Press Enter to continue or Ctrl-C to abort."
+    read -r < /dev/tty
+  fi
 
   say "Uninstalling current registry Helm release (deletes Deployment + PVC)…"
   helm uninstall registry -n registry --wait --timeout=120s

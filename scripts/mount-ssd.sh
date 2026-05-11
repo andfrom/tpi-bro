@@ -23,6 +23,7 @@ CONFIG_FILE="${SCRIPT_DIR}/../bootstrap-config.kv"
 STATE_FILE="${SCRIPT_DIR}/../bootstrap-state.kv"
 SSH_KEY="${HOME}/.ssh/id_ed25519"
 DRY=0
+YES=0
 DO_NODES=1
 DO_SC=1
 DO_VERIFY=0
@@ -32,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     --config)           CONFIG_FILE="$2"; shift 2 ;;
     --state)            STATE_FILE="$2";  shift 2 ;;
     --dry-run)          DRY=1;            shift   ;;
+    --yes)              YES=1;            shift   ;;
     --verify)           DO_VERIFY=1; DO_NODES=0; DO_SC=0; shift ;;
     --no-storageclass)  DO_SC=0;          shift   ;;
     --storageclass-only) DO_NODES=0;      shift   ;;
@@ -49,7 +51,7 @@ err()     { echo "ERROR: $*" >&2; exit 1; }
 
 node_ssh() {
   local ip="$1"; shift
-  ssh -i "$SSH_KEY" \
+  ssh -i "$SSH_KEY" -n \
     -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null \
     -o ConnectTimeout=15 \
@@ -279,10 +281,12 @@ if (( DO_NODES )); then
   say "Existing data on these disks will be DESTROYED."
   if (( DRY )); then
     say "Dry-run: no changes will be made."
+  elif (( YES )); then
+    say "--yes: skipping confirmation."
   else
     echo
     echo "Press Enter to continue or Ctrl-C to abort."
-    read -r
+    read -r < /dev/tty
   fi
 
   for (( i=0; i<${#SSD_NODES[@]}; i++ )); do

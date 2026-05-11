@@ -26,6 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STATE_FILE="${SCRIPT_DIR}/../bootstrap-state.kv"
 CONFIG_FILE="${SCRIPT_DIR}/../bootstrap-config.kv"
 DRY=0
+YES=0
 DO_CHECK=0
 FROM_STAGE=""
 TO_STAGE=""
@@ -37,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --from)     FROM_STAGE="$2";  shift 2 ;;
     --to)       TO_STAGE="$2";    shift 2 ;;
     --dry-run)  DRY=1;            shift   ;;
+    --yes)      YES=1;            shift   ;;
     --check)    DO_CHECK=1;       shift   ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
   esac
@@ -74,7 +76,9 @@ fi
 # ---- helpers ----------------------------------------------------------------
 
 DRY_FLAG=()
+YES_FLAG=()
 (( DRY )) && DRY_FLAG=(--dry-run)
+(( YES )) && YES_FLAG=(--yes)
 
 run_stage() {
   local name="$1"; shift
@@ -148,7 +152,8 @@ do_B09_mount_ssd() {
     bash "${SCRIPT_DIR}/mount-ssd.sh" \
       --config "$CONFIG_FILE" \
       --state  "$STATE_FILE" \
-      "${DRY_FLAG[@]}"
+      "${DRY_FLAG[@]}" \
+      "${YES_FLAG[@]}"
 }
 
 do_B09_migrate_pvc() {
@@ -157,7 +162,8 @@ do_B09_migrate_pvc() {
       --config "$CONFIG_FILE" \
       --state  "$STATE_FILE" \
       --migrate-pvc \
-      "${DRY_FLAG[@]}"
+      "${DRY_FLAG[@]}" \
+      "${YES_FLAG[@]}"
 }
 
 # ---- main loop --------------------------------------------------------------
