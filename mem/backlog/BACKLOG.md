@@ -193,6 +193,41 @@ Opt-in, not mandatory — existing repo-local workflow still works.
 
 ---
 
+## Hardware Upgrades (Future)
+
+### HW-01: NVMe disk replacement and node4 SSD addition
+**Status:** TODO — do not attempt until scripting is updated and hardware is in hand.
+
+**Scenario:** Replace node1's 2TB SSD with a 4TB, move the 2TB to node4.
+
+**Why it's safe:** All data on the SSDs (registry images, Ollama model weights) is
+fully reproducible — images can be rebuilt and re-pushed, model weights re-pulled.
+No irreplaceable state lives on the SSDs.
+
+**Rough sequence:**
+1. Record what images are in the registry (re-push list)
+2. `kubectl drain rk1-node1 --ignore-daemonsets --delete-emptydir-data`
+3. `tpi power off` both nodes; physical swap (4TB → node1, 2TB → node4)
+4. `tpi power on`
+5. Node1: remove stale fstab entry (`sudo sed -i '/mnt\/ssd/d' /etc/fstab`), then re-mount + re-format
+6. Node4: run `mount-ssd.sh` — detects new NVMe, formats, mounts, adds to ConfigMap, labels node
+7. Re-deploy registry (PVC recreates on new 4TB); re-push all images
+8. Re-pull Ollama models on node1 (`install-ollama.sh --node rk1-node1 --model llama3.2:3b`)
+9. Deploy Ollama on node4 (`install-ollama.sh --node rk1-node4 --model llama3.2:3b`)
+10. `kubectl uncordon rk1-node1`
+
+**Tooling gaps to fix before attempting:**
+- `mount-ssd.sh` has no `--node` flag — currently targets all NVMe nodes at once.
+  Need per-node targeting so nodes 2 and 3 are left untouched during a node1 swap.
+- `mount-ssd.sh` does not handle stale fstab entries from a replaced disk.
+  Need a `--force-remount` mode that strips existing `/mnt/ssd` fstab lines before
+  adding the new UUID, so `mount -a` doesn't choke on the old disk's UUID.
+
+**Before starting:** add `--node` and `--force-remount` to `mount-ssd.sh`, test
+with `--dry-run` on a live node, then proceed with the hardware swap.
+
+---
+
 ## Documentation
 
 ### DOC-01: Expand README with BMC reconnection steps
