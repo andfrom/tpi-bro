@@ -16,7 +16,7 @@ case "$cmd" in
       ip="${args[$i]}"; name="${args[$((i+1))]}"
       i=$((i+2))
       [ -z "$ip" ] || [ -z "$name" ] && continue
-      if ! grep -qE "^[[:space:]]*$ip[[:space:]].*\b$name\b" /etc/hosts; then
+      if ! grep -qE "^[[:space:]]*${ip}[[:space:]].*\b${name}\b" /etc/hosts; then
         echo "$ip $name" >> /etc/hosts
         echo "added: $ip $name"
       else
