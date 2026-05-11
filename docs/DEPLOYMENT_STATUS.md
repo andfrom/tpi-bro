@@ -81,6 +81,13 @@ Registry basic auth credentials are stored in `~/.turingpi/credentials.kv` (mode
 # ~/.turingpi/credentials.kv  (key=value, chmod 600)
 REGISTRY_USER=push
 REGISTRY_PASSWORD=<generated on first --enable-auth run>
+
+# N-01: Tailscale (Layer 1)
+TAILSCALE_AUTH_KEY=<reusable pre-authorized key from https://login.tailscale.com/admin/settings/keys>
+
+# N-01: Tailscale (Layer 3 — operator)
+TAILSCALE_OAUTH_CLIENT_ID=<OAuth client ID from https://login.tailscale.com/admin/settings/oauth>
+TAILSCALE_OAUTH_CLIENT_SECRET=<OAuth client secret>
 ```
 
 Run `./scripts/setup-registry.sh --verify` to confirm push/pull with authentication.  

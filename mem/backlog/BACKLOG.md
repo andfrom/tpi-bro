@@ -152,7 +152,7 @@ Prometheus + Grafana via kube-prometheus-stack Helm chart. Basic dashboards: CPU
 ## Network Layer
 
 ### N-01: Tailscale mesh — cluster as seamless network extension
-**Status:** TODO — **next priority after D-02**
+**Status:** SCRIPTED — ready to run (add keys to `~/.turingpi/credentials.kv` first)
 
 Tailscale is not just remote access. It is the network substrate that makes every application on the laptop interact with the cluster without port-forwarding, without `kubectl` tunnels, without knowing about home router topology or NAT. The cluster becomes a seamless extension of the laptop for any process.
 
@@ -179,10 +179,10 @@ The operator watches for annotated Services and exposes each as its own Tailscal
 
 **Implementation order:** Layer 1 → Layer 2 → Layer 3. Each layer is usable standalone.
 
-**Scripts needed:**
-- `scripts/install-tailscale.sh` — installs + authenticates tailscaled on all 4 nodes (auth key from `~/.turingpi/credentials.kv`)
-- `scripts/setup-subnet-router.sh` — enables subnet route advertisement on node1, approves in Tailscale admin
-- Helm chart or manifest for Tailscale operator in k3s
+**Scripts:**
+- `scripts/install-tailscale.sh` — installs + authenticates tailscaled on all 4 nodes; `--status` to inspect
+- `scripts/setup-subnet-router.sh` — enables IP forwarding on node1, advertises k3s CIDRs; requires manual route approval in Tailscale admin
+- `scripts/setup-tailscale-operator.sh` — deploys Tailscale k8s operator via Helm; `--expose svc/NAME -n NS` to expose a service
 
 ---
 
