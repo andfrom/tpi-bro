@@ -64,8 +64,8 @@ say "Configuring rk1-node${SERVER_IDX} (${SERVER_IP}) as Tailscale subnet router
 info "Advertising: ${POD_CIDR} (pods), ${SVC_CIDR} (services)"
 
 if (( DRY )); then
-  info "[dry-run] Would: enable net.ipv4.ip_forward on rk1-node${SERVER_IDX}"
-  info "[dry-run] Would: sudo tailscale up --advertise-routes=${POD_CIDR},${SVC_CIDR} --accept-routes --accept-dns=false"
+  info "[dry-run] Would: enable net.ipv4.ip_forward + net.ipv6.conf.all.forwarding on rk1-node${SERVER_IDX}"
+  info "[dry-run] Would: sudo tailscale up --hostname=rk1-node${SERVER_IDX} --advertise-routes=${POD_CIDR},${SVC_CIDR} --accept-routes --accept-dns=false"
   info ""
   info "[dry-run] ACTION REQUIRED after real run:"
   info "  https://login.tailscale.com/admin/machines → rk1-node${SERVER_IDX} → Edit route settings"
@@ -74,11 +74,14 @@ if (( DRY )); then
 fi
 
 say "Enabling IP forwarding…"
-node_ssh "$SERVER_IP" "echo 'net.ipv4.ip_forward = 1' | sudo tee /etc/sysctl.d/99-tailscale.conf > /dev/null \
+node_ssh "$SERVER_IP" "printf 'net.ipv4.ip_forward = 1\nnet.ipv6.conf.all.forwarding = 1\n' \
+  | sudo tee /etc/sysctl.d/99-tailscale.conf > /dev/null \
   && sudo sysctl -p /etc/sysctl.d/99-tailscale.conf > /dev/null"
 
 say "Advertising subnet routes…"
+# Must restate all non-default flags when changing settings via tailscale up.
 node_ssh "$SERVER_IP" "sudo tailscale up \
+  --hostname=rk1-node${SERVER_IDX} \
   --advertise-routes=${POD_CIDR},${SVC_CIDR} \
   --accept-routes \
   --accept-dns=false"

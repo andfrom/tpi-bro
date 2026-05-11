@@ -1,6 +1,6 @@
 # tpi-bro — Deployment Status
 
-_Last updated: 2026-05-11 (D-01 Ollama + D-02 Agent A deployed)_
+_Last updated: 2026-05-11 (N-01 Tailscale mesh — Layer 1 + Layer 2 complete)_
 
 ## Cluster Hardware
 
@@ -39,7 +39,8 @@ _Last updated: 2026-05-11 (D-01 Ollama + D-02 Agent A deployed)_
 | Storage | `local-ssd` StorageClass (rancher.io/local-path-ssd, WaitForFirstConsumer) | **Running** in kube-system; scoped to nodes 1–3 (NVMe only) |
 | LLM runtime | Ollama (`charts/ollama/`); one Deployment per NVMe node; 200Gi PVC `local-ssd` | **Running**; `llama3.2:3b` pulled on ollama-node1; namespace `ollama` |
 | Agent | `sibling-app` Agent A (`sibling-app/infra/k8s/agent-a.yaml`); FastAPI on port 18090; `OLLAMA_URL=http://ollama-node1.ollama:11434` | **Deployed**; namespace `sibling-app`; build+deploy via `deploy-agent-a.sh` |
-| Ingress | Traefik (k3s built-in) | Running (k3s default) |
+| Network mesh | Tailscale 1.96.4; all 4 nodes + laptop on Tailnet; subnet routes `10.42.0.0/16` + `10.43.0.0/16` advertised via node1 | **Running** — Layer 1 + Layer 2 done; Layer 3 (operator) TODO |
+| Ingress | Traefik (k3s built-in) | Running (k3s default); superseded by Tailscale operator for service exposure |
 
 ## Access Methods
 
@@ -50,6 +51,22 @@ _Last updated: 2026-05-11 (D-01 Ollama + D-02 Agent A deployed)_
 | Registry push (Phase A) | `docker push rk1-node1:5000/IMAGE` | HTTP only; Docker daemon needs insecure-registries config |
 | Registry push (Phase B) | `docker push rk1-node1:5000/IMAGE` | HTTPS; CA cert must be trusted on laptop |
 | kubectl | `kubectl get nodes` | After k3s install; kubeconfig on node1 at `/etc/rancher/k3s/k3s.yaml` |
+
+## Tailscale Mesh (N-01)
+
+| Device | Hostname |
+|--------|----------|
+| Laptop | (your machine name in Tailscale admin) |
+| rk1-node1 | rk1-node1 |
+| rk1-node2 | rk1-node2 |
+| rk1-node3 | rk1-node3 |
+| rk1-node4 | rk1-node4 |
+
+Check live IPs with `tailscale status` or at <https://login.tailscale.com/admin/machines>.
+
+Subnet routes `10.42.0.0/16` (pods) and `10.43.0.0/16` (services) advertised by node1 and approved in Tailscale admin. Laptop runs `tailscale up --accept-routes`. All ClusterIP services are directly routable from the laptop — no port-forwarding required.
+
+Layer 3 (Tailscale Kubernetes operator) not yet deployed — see `docs/PREREQUISITES.md` for setup steps.
 
 ## Registry TLS Cert Status
 

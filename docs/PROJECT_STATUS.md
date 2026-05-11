@@ -148,9 +148,9 @@ IPs, MACs, and other operational details are in `bootstrap-state.kv` (gitignored
 
 ## Immediate Next Steps
 
-1. **D-00: PriorityClass + ResourceRequests** — now unblocked; add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
-2. **D-03: Ingress controller** — route `/agent-a/` externally; Traefik is already running (k3s built-in).
-3. **S-04: Tailscale** — external access from laptop outside home LAN.
+1. **N-01 Layer 3: Tailscale operator** — expose services by name on the Tailnet (`agent-a.<tailnet>.ts.net`); requires OAuth client in `~/.turingpi/credentials.kv`.
+2. **D-00: PriorityClass + ResourceRequests** — add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
+3. **D-04: Observability** — Prometheus + Grafana; needed to tune resource requests meaningfully.
 4. **MetalLB (B-05 / C-01)** — stable registry VIP; removes the HostPort-forced node1 pin.
 
 See `docs/DEPLOYMENT_STATUS.md` for the full current cluster state and `mem/backlog/BACKLOG.md` for the ordered backlog.

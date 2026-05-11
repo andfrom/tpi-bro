@@ -152,7 +152,7 @@ Prometheus + Grafana via kube-prometheus-stack Helm chart. Basic dashboards: CPU
 ## Network Layer
 
 ### N-01: Tailscale mesh — cluster as seamless network extension
-**Status:** SCRIPTED — ready to run (add keys to `~/.turingpi/credentials.kv` first)
+**Status:** Layer 1 + Layer 2 DONE (2026-05-11). Layer 3 (operator) TODO.
 
 Tailscale is not just remote access. It is the network substrate that makes every application on the laptop interact with the cluster without port-forwarding, without `kubectl` tunnels, without knowing about home router topology or NAT. The cluster becomes a seamless extension of the laptop for any process.
 
