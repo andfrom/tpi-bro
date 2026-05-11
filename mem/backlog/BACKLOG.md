@@ -137,8 +137,8 @@ Document how to federate the local cluster with a cloud K8s cluster (e.g., for G
 `charts/ollama/` — single Helm chart, one release per NVMe node (`ollama-node1/2/3`), namespace `ollama`. Node hostname pin justified by model-weight locality (ADR-0019). PVC 200Gi `local-ssd` per instance. `scripts/install-ollama.sh` auto-detects NVMe nodes via label, deploys all three, optionally pulls models. In-cluster DNS: `ollama-node1.ollama:11434`, etc.
 
 ### D-02: Agent deployment (sibling-app Agent A)
-**Status:** TODO  
-Deploy the `sibling-app` Agent A agent as a Kubernetes Deployment on `rk1-node1`, with a Service and Ingress (or NodePort) for the FastAPI endpoint.
+**Status:** DONE (2026-05-11)  
+`scripts/deploy-agent-a.sh` — builds linux/arm64 image on laptop via QEMU + docker buildx (docker-container driver), pushes to cluster registry, applies `sibling-app/infra/k8s/agent-a.yaml`. Namespace `sibling-app`, Deployment + ClusterIP Service on port 18090. `OLLAMA_URL=http://ollama-node1.ollama:11434`. No node pin (stateless). `model.cfg` updated to `llama3.2:3b`.
 
 ### D-03: Ingress controller
 **Status:** TODO  

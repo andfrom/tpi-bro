@@ -51,7 +51,8 @@ jobs:
             scripts/install-ca.sh \
             scripts/setup-registry.sh \
             scripts/mount-ssd.sh \
-            scripts/install-ollama.sh
+            scripts/install-ollama.sh \
+            scripts/deploy-agent-a.sh
 
       - name: shellcheck — test runners
         run: shellcheck --severity=warning tests/run-ci.sh tests/run-hardware.sh tests/check-cluster.sh
