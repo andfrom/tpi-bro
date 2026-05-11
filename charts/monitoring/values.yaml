@@ -1,0 +1,100 @@
+# kube-prometheus-stack overrides for tpi-bro (ARM64 k3s, 4-node RK1 cluster)
+#
+# Applied by: scripts/install-monitoring.sh
+# Grafana admin password is passed at install time from ~/.turingpi/credentials.kv
+
+# ── k3s: these components are bundled inside k3s, not separate endpoints ──────
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false  # k3s uses SQLite by default; no etcd endpoint
+
+# ── Prometheus ─────────────────────────────────────────────────────────────────
+prometheus:
+  prometheusSpec:
+    retention: 30d
+    # Pin to NVMe nodes so local-ssd PVC binding succeeds
+    nodeSelector:
+      storage.tpi-bro/nvme: "true"
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-ssd
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+
+# ── Grafana ────────────────────────────────────────────────────────────────────
+grafana:
+  # adminPassword set via --set at install time (from credentials.kv)
+  persistence:
+    enabled: true
+    storageClassName: local-ssd
+    size: 5Gi
+  nodeSelector:
+    storage.tpi-bro/nvme: "true"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  # Pre-load standard dashboards from grafana.com
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: default
+          orgId: 1
+          folder: ""
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+  dashboards:
+    default:
+      node-exporter-full:
+        gnetId: 1860
+        revision: 37
+        datasource: Prometheus
+      kubernetes-cluster-overview:
+        gnetId: 7249
+        revision: 1
+        datasource: Prometheus
+      k3s-cluster:
+        gnetId: 15282
+        revision: 1
+        datasource: Prometheus
+
+# ── Alertmanager ───────────────────────────────────────────────────────────────
+alertmanager:
+  alertmanagerSpec:
+    nodeSelector:
+      storage.tpi-bro/nvme: "true"
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-ssd
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+
+# ── Node Exporter + kube-state-metrics (run everywhere) ───────────────────────
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true

@@ -144,8 +144,9 @@ Document how to federate the local cluster with a cloud K8s cluster (e.g., for G
 **Status:** TODO — superseded in priority by N-01 (Tailscale mesh). Revisit after N-01; Tailscale operator may cover all ingress needs for this use case.
 
 ### D-04: Observability baseline
-**Status:** TODO  
-Prometheus + Grafana via kube-prometheus-stack Helm chart. Basic dashboards: CPU, RAM, GPU/NPU utilization per node.
+**Status:** DONE (2026-05-11)  
+`kube-prometheus-stack` deployed via `scripts/install-monitoring.sh` in namespace `monitoring`. Grafana exposed on Tailnet via operator. Pre-loaded dashboards: node-exporter-full (gnetId 1860), k8s cluster overview (7249), k3s (15282). Stateful components (Prometheus, Grafana, Alertmanager) pinned to NVMe nodes via `storage.tpi-bro/nvme=true` nodeSelector; all PVCs on `local-ssd`. k3s-specific components (kubeControllerManager/Scheduler/Proxy/Etcd) disabled. Grafana accessible at `monitoring-kube-prometheus-stack-grafana.<tailnet>.ts.net:80`.  
+Config: `charts/monitoring/values.yaml`. Verify: `./scripts/install-monitoring.sh --verify`.
 
 ---
 
