@@ -82,10 +82,11 @@ jobs:
       - name: helm template — monitoring values (verify render against upstream chart)
         run: helm template test-release prometheus-community/kube-prometheus-stack -f charts/monitoring/values.yaml > /dev/null
 
-      - name: Install kubectl (for manifest dry-run)
+      - name: Install kubeconform (offline manifest validation)
         run: |
-          curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar -xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
 
-      - name: kubectl dry-run — manifests/
-        run: kubectl apply --dry-run=client --validate=false -f manifests/
+      - name: kubeconform — manifests/
+        run: kubeconform -strict -summary manifests/
