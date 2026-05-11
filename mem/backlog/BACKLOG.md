@@ -129,8 +129,8 @@ Document how to federate the local cluster with a cloud K8s cluster (e.g., for G
 ## Phase D — Multi-Agent Workloads
 
 ### D-00: Apply PriorityClass and ResourceRequests to all agent Deployments
-**Status:** TODO  
-`[BLOCKED on D-01]` Create `interactive` (value 1000) and `background` (value 100) PriorityClasses. Set resource requests + limits on all agent and Ollama pods per ADR-0008. Add a LimitRange to each namespace.
+**Status:** DONE (2026-05-11)  
+`manifests/priority-classes.yaml`: `interactive` (1000, agent-a) and `background` (100, Ollama). `manifests/limitrange-sibling-app.yaml` + `manifests/limitrange-ollama.yaml`. Ollama chart updated with `priorityClassName: background`; Agent A manifest with `priorityClassName: interactive`. Applied via `scripts/apply-resource-policy.sh`.
 
 ### D-01: Ollama deployment on each LLM node
 **Status:** DONE (2026-05-11)  
@@ -205,20 +205,8 @@ PriorityClass for critical agents; ResourceQuota per namespace; eviction policy 
 ## Configuration & UX
 
 ### CFG-01: `~/.turingpi/` home directory for personal config
-**Status:** TODO  
-Currently personal config files (`bootstrap-config.kv`, `images-manifest.kv`, `bmc-manifest.kv`) and image downloads live gitignored in the repo root — conflating the tool with the installation. A standard home directory would be cleaner:
-
-```
-~/.turingpi/
-  bootstrap-config.kv     # auto-loaded if no repo-local config and no --config flag
-  images-manifest.kv      # default image manifest
-  bmc-manifest.kv         # default BMC firmware manifest
-  image-cache/            # downloaded images (can be large; shared across clones)
-  clusters/               # future: named profiles for multiple clusters
-```
-
-Auto-load priority order: `--config FILE` (explicit) > `./bootstrap-config.kv` (repo-local) > `~/.turingpi/bootstrap-config.kv` (user-global).  
-Opt-in, not mandatory — existing repo-local workflow still works.
+**Status:** DONE (2026-05-11)  
+Both bootstrap scripts now fall back to `~/.turingpi/bootstrap-config.kv` when no repo-local config exists. `MANIFEST_FILE` and `IMAGE_CACHE_DIR` defaults also prefer `~/.turingpi/` when no repo-local file exists. Priority order: `--config FILE` > `./bootstrap-config.kv` > `~/.turingpi/bootstrap-config.kv`. Repo-local workflow unchanged.
 
 ---
 

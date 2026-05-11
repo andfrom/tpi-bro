@@ -56,7 +56,8 @@ jobs:
             scripts/install-tailscale.sh \
             scripts/setup-subnet-router.sh \
             scripts/setup-tailscale-operator.sh \
-            scripts/install-monitoring.sh
+            scripts/install-monitoring.sh \
+            scripts/apply-resource-policy.sh
 
       - name: shellcheck — test runners
         run: shellcheck --severity=warning tests/run-ci.sh tests/run-hardware.sh tests/check-cluster.sh

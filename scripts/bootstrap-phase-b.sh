@@ -24,7 +24,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 STATE_FILE="${SCRIPT_DIR}/../bootstrap-state.kv"
-CONFIG_FILE="${SCRIPT_DIR}/../bootstrap-config.kv"
+# Config: repo-local wins; fall back to user-global in ~/.turingpi/
+if   [[ -f "${SCRIPT_DIR}/../bootstrap-config.kv" ]]; then
+  CONFIG_FILE="${SCRIPT_DIR}/../bootstrap-config.kv"
+elif [[ -f "${HOME}/.turingpi/bootstrap-config.kv" ]]; then
+  CONFIG_FILE="${HOME}/.turingpi/bootstrap-config.kv"
+else
+  CONFIG_FILE="${SCRIPT_DIR}/../bootstrap-config.kv"
+fi
 DRY=0
 YES=0
 DO_CHECK=0

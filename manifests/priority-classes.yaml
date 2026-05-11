@@ -1,0 +1,15 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: interactive
+value: 1000
+globalDefault: false
+description: "User-facing agents (agent-a, future agents with direct user interaction)"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: background
+value: 100
+globalDefault: false
+description: "Inference and batch services (Ollama, background processing)"

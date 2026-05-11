@@ -22,6 +22,8 @@ persistence:
 #   OLLAMA_NUM_PARALLEL: concurrent inference requests (default 1)
 extraEnv: []
 
+priorityClassName: background
+
 resources:
   requests:
     cpu: "2"

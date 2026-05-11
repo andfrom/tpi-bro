@@ -29,8 +29,13 @@ set IMAGE_DEFAULT ""            ;# image path for all nodes (image mode); overri
 set IMAGE_PATHS [dict create]   ;# node index → image path overrides (set via --image-N or config IMAGE_N)
 set IMAGE_DEFAULT_TYPE "default" ;# manifest image type for all nodes (download mode)
 set IMAGE_NODE_TYPES [dict create] ;# node index → manifest type overrides (config IMAGE_N_TYPE)
-set MANIFEST_FILE "./images-manifest.kv" ;# image manifest for download mode
-set IMAGE_CACHE_DIR "./image-cache"      ;# local cache for downloaded images
+set _home_tpi [file join $::env(HOME) ".turingpi"]
+set MANIFEST_FILE [expr {[file exists "./images-manifest.kv"] \
+  ? "./images-manifest.kv" \
+  : [file join $_home_tpi "images-manifest.kv"]}]
+set IMAGE_CACHE_DIR [expr {[file exists "./image-cache"] \
+  ? "./image-cache" \
+  : [file join $_home_tpi "image-cache"]}]
 set SERVER_NODE_IDX 1           ;# which node runs k3s server (Phase B reference; not used by flash itself)
 set BMC_FIRMWARE_MODE "skip"    ;# skip|check|upgrade  (A0 stage)
 set BMC_MANIFEST_FILE "./bmc-manifest.kv"  ;# version + download URL for BMC firmware
@@ -560,11 +565,17 @@ for {set i 0} {$i < $argc} {incr i} {
   if {$a eq "--help" || $a eq "--usage"} { print_help; exit 0 }
   if {$a eq "--config"} { incr i; lappend _config_files [lindex $argv $i] }
 }
-# Auto-load ./bootstrap-config.kv when no --config was given.
-# Set BOOTSTRAP_NO_AUTO_CONFIG=1 in the environment to suppress (used by CI tests).
-if {[llength $_config_files] == 0 && [file exists "./bootstrap-config.kv"] \
-    && ![info exists ::env(BOOTSTRAP_NO_AUTO_CONFIG)]} {
-  lappend _config_files "./bootstrap-config.kv"
+# Auto-load config when no --config was given.
+# Priority: ./bootstrap-config.kv (repo-local) > ~/.turingpi/bootstrap-config.kv (user-global)
+# Set BOOTSTRAP_NO_AUTO_CONFIG=1 to suppress (used by CI tests).
+if {[llength $_config_files] == 0 && ![info exists ::env(BOOTSTRAP_NO_AUTO_CONFIG)]} {
+  set _home_cfg [file join $::env(HOME) ".turingpi" "bootstrap-config.kv"]
+  if {[file exists "./bootstrap-config.kv"]} {
+    lappend _config_files "./bootstrap-config.kv"
+  } elseif {[file exists $_home_cfg]} {
+    lappend _config_files $_home_cfg
+  }
+  unset _home_cfg
 }
 foreach _cf $_config_files {
   if {![file exists $_cf]} { die "Config file not found: $_cf" }

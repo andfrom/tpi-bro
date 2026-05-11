@@ -312,6 +312,129 @@ Grafana Tailnet service. Expect to see:
 
 ---
 
+## D-00: Resource policy (PriorityClasses + LimitRanges)
+
+This is a one-time cluster setup step that makes the scheduler smarter about
+what to protect when the cluster is under memory pressure. It also sets default
+resource requests for any pod that forgets to specify them, so nothing gets
+scheduled with zero requests and starves other workloads.
+
+**Prerequisite:** k3s must be running and `kubectl` must reach the cluster.
+Run this before deploying Ollama or any agent — the `priorityClassName` field
+is silently ignored if the PriorityClass object doesn't exist yet.
+
+### Step 1 — Apply the policy
+
+```bash
+./scripts/apply-resource-policy.sh
+```
+
+This creates two cluster-scoped PriorityClasses and one LimitRange per
+workload namespace:
+
+| PriorityClass | Value | Assigned to |
+|---------------|-------|-------------|
+| `interactive` | 1000 | Agent A and future user-facing agents |
+| `background`  | 100  | Ollama inference pods |
+
+Higher value = higher scheduling priority and last-to-evict under pressure.
+With these in place, if the cluster runs out of memory, Ollama (background)
+is evicted before Agent A (interactive).
+
+### Step 2 — Verify the policy was applied
+
+```bash
+./scripts/apply-resource-policy.sh --verify
+```
+
+You should see `interactive` and `background` listed under PriorityClasses,
+and a `LimitRange` entry in each of the `sibling-app` and `ollama` namespaces.
+
+### Step 3 — Restart existing pods to pick up priorityClassName
+
+If Ollama or Agent A were already running before you applied the policy,
+their pods need to be restarted to get the `priorityClassName` field:
+
+```bash
+kubectl rollout restart deployment -n ollama
+kubectl rollout restart deployment -n sibling-app
+```
+
+Check the new pods have the right priority:
+```bash
+kubectl get pod -n sibling-app -o wide
+kubectl describe pod -n sibling-app -l app=agent-a | grep Priority
+# Should show: Priority: 1000 / PriorityClassName: interactive
+
+kubectl describe pod -n ollama -l app=ollama-node1 | grep Priority
+# Should show: Priority: 100 / PriorityClassName: background
+```
+
+---
+
+## CFG-01: Personal config in `~/.turingpi/`
+
+By default the bootstrap scripts look for config files in the repo root
+(`./bootstrap-config.kv`, `./images-manifest.kv`, `./image-cache/`). That
+means personal settings live inside your clone — they're gitignored, but
+they also get lost if you re-clone or switch to a different machine.
+
+You can keep everything in `~/.turingpi/` instead. The scripts check there
+automatically when no repo-local file exists.
+
+### What goes where
+
+```
+~/.turingpi/
+  credentials.kv          ← already here (registry, Tailscale, Grafana secrets)
+  bootstrap-config.kv     ← personal overrides (BMC host, node count, etc.)
+  images-manifest.kv      ← OS image URLs + SHA256s for your hardware
+  bmc-manifest.kv         ← BMC firmware version + URL
+  image-cache/            ← downloaded image files (can be several GB)
+```
+
+### Setting it up
+
+Create `~/.turingpi/bootstrap-config.kv` with your personal settings:
+
+```bash
+mkdir -p ~/.turingpi
+chmod 700 ~/.turingpi
+cat > ~/.turingpi/bootstrap-config.kv <<'EOF'
+# Personal tpi-bro config — never committed to git
+BMC_HOST=192.168.1.10
+NODE_COUNT=4
+MANIFEST_FILE=~/.turingpi/images-manifest.kv
+IMAGE_CACHE_DIR=~/.turingpi/image-cache
+EOF
+```
+
+Copy the example manifests as starting points:
+
+```bash
+cp images-manifest.kv.example ~/.turingpi/images-manifest.kv
+cp bmc-manifest.kv.example    ~/.turingpi/bmc-manifest.kv
+# Then edit each file to fill in your image URLs and SHA256 checksums
+```
+
+### How the fallback works
+
+The lookup order for each script is:
+
+1. `--config FILE` (explicit flag — always wins)
+2. `./bootstrap-config.kv` (repo-local — exists during active development)
+3. `~/.turingpi/bootstrap-config.kv` (user-global — used when no repo-local file)
+
+The same fallback applies to `MANIFEST_FILE` and `IMAGE_CACHE_DIR`: if
+`./images-manifest.kv` doesn't exist in the repo, the script defaults to
+`~/.turingpi/images-manifest.kv`. You can also override these explicitly in
+your `bootstrap-config.kv`.
+
+> **Tip:** Once your `~/.turingpi/` is set up you can delete the gitignored
+> copies from the repo root — the scripts will find the right files automatically.
+
+---
+
 ## Distribution support
 
 | OS | Phase A | Phase B | Notes |

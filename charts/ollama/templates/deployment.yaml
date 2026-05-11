@@ -17,6 +17,7 @@ spec:
       labels:
         app: {{ .Release.Name }}
     spec:
+      priorityClassName: {{ .Values.priorityClassName | quote }}
       nodeSelector:
         kubernetes.io/hostname: {{ .Values.nodeName | quote }}
       containers:
