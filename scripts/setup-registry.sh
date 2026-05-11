@@ -6,6 +6,7 @@
 #   ./setup-registry.sh --certs-only # just generate certs
 #   ./setup-registry.sh --ca-only    # just distribute CA to all nodes
 #   ./setup-registry.sh --enable-auth # B-07: create htpasswd secret + enable auth
+#   ./setup-registry.sh --migrate-pvc # B-09: move registry PVC from eMMC to local-ssd
 #   ./setup-registry.sh --verify     # test registry push/pull (with login if auth enabled)
 #   ./setup-registry.sh [--config FILE] [--state FILE]
 set -euo pipefail
@@ -23,6 +24,7 @@ DO_CA=1
 DO_LAPTOP=1
 DO_AUTH=0
 DO_VERIFY=0
+DO_MIGRATE_PVC=0
 DRY=0
 
 while [[ $# -gt 0 ]]; do
@@ -38,6 +40,8 @@ while [[ $# -gt 0 ]]; do
                     DO_HELM=0; DO_WAIT=0; DO_CA=0; DO_LAPTOP=0; DO_AUTH=1; shift ;;
     --verify)       DO_CERTS=0; DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0;
                     DO_HELM=0; DO_WAIT=0; DO_CA=0; DO_LAPTOP=0; DO_VERIFY=1; shift ;;
+    --migrate-pvc)  DO_CERTS=0; DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0;
+                    DO_HELM=0; DO_WAIT=0; DO_CA=0; DO_LAPTOP=0; DO_MIGRATE_PVC=1; shift ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
   esac
 done
@@ -264,6 +268,60 @@ stage_enable_auth() {
 
 # ---- stage: verify ----------------------------------------------------------
 
+stage_migrate_pvc() {
+  say "Migrating registry PVC from eMMC (local-path) to SSD (local-ssd)…"
+  if (( DRY )); then
+    info "[dry-run] Would: helm uninstall registry -n registry --wait"
+    info "[dry-run] Would: helm upgrade --install registry … --set persistence.storageClass=local-ssd"
+    info "[dry-run] Note: existing registry data (pushed images) will be lost"
+    return 0
+  fi
+
+  # Verify local-ssd StorageClass exists before proceeding
+  kubectl get sc local-ssd &>/dev/null \
+    || err "StorageClass 'local-ssd' not found. Run mount-ssd.sh first."
+
+  # Verify the SSD is actually mounted on the server node
+  local ssd_mounted
+  ssd_mounted=$(node_ssh "$SERVER_IP" "mountpoint -q /mnt/ssd && echo yes || echo no" 2>/dev/null || echo no)
+  [[ "$ssd_mounted" == "yes" ]] \
+    || err "/mnt/ssd is not mounted on ${SERVER_NODE}. Run mount-ssd.sh first."
+
+  say "WARNING: existing registry data (pushed images) will be deleted."
+  echo "  The registry secrets (TLS + auth) are preserved."
+  echo "  Re-push any images you need after this step."
+  echo
+  echo "Press Enter to continue or Ctrl-C to abort."
+  read -r
+
+  say "Uninstalling current registry Helm release (deletes Deployment + PVC)…"
+  helm uninstall registry -n registry --wait --timeout=120s
+
+  # Confirm PVC is gone before reinstalling
+  local retries=0
+  while kubectl get pvc registry-data -n registry &>/dev/null; do
+    (( retries++ < 12 )) || err "PVC registry-data still exists after 60s"
+    info "Waiting for PVC to be deleted…"
+    sleep 5
+  done
+
+  say "Reinstalling registry with persistence.storageClass=local-ssd…"
+  helm upgrade --install registry "$(dirname "$0")/../charts/registry" \
+    -n registry \
+    --reuse-values \
+    --set persistence.storageClass=local-ssd
+
+  say "Waiting for registry pod to be Ready (up to 120s)…"
+  kubectl wait --for=condition=ready pod \
+    -l app=registry \
+    -n registry \
+    --timeout=120s
+
+  say "PVC migration complete."
+  info "New PVC storage class: local-ssd (backed by /mnt/ssd/ on ${SERVER_NODE})"
+  kubectl get pvc registry-data -n registry
+}
+
 stage_verify() {
   say "Verifying registry with a test push/pull…"
   if (( DRY )); then
@@ -314,7 +372,8 @@ stage_verify() {
 (( DO_WAIT       )) && stage_wait_pod
 (( DO_CA         )) && stage_ca_distribute
 (( DO_LAPTOP     )) && stage_laptop_docker_trust
-(( DO_AUTH       )) && stage_enable_auth
-(( DO_VERIFY     )) && stage_verify
+(( DO_AUTH        )) && stage_enable_auth
+(( DO_MIGRATE_PVC )) && stage_migrate_pvc
+(( DO_VERIFY      )) && stage_verify
 
 say "Done."

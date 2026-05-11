@@ -16,6 +16,8 @@
 #   B2_registry    — deploy private registry via Helm
 #   B2_auth        — enable basic auth on registry
 #   B2_verify      — smoke-test registry push/pull from laptop
+#   B09_mount_ssd  — format + mount NVMe SSDs; deploy local-ssd StorageClass
+#   B09_migrate_pvc — move registry PVC from eMMC to SSD (data loss; re-push images after)
 
 set -euo pipefail
 
@@ -49,6 +51,8 @@ STAGES=(
   B2_registry
   B2_auth
   B2_verify
+  B09_mount_ssd
+  B09_migrate_pvc
 )
 
 say()  { echo "==> $*"; }
@@ -136,6 +140,23 @@ do_B2_verify() {
       --config "$CONFIG_FILE" \
       --state  "$STATE_FILE" \
       --verify \
+      "${DRY_FLAG[@]}"
+}
+
+do_B09_mount_ssd() {
+  run_stage B09_mount_ssd \
+    bash "${SCRIPT_DIR}/mount-ssd.sh" \
+      --config "$CONFIG_FILE" \
+      --state  "$STATE_FILE" \
+      "${DRY_FLAG[@]}"
+}
+
+do_B09_migrate_pvc() {
+  run_stage B09_migrate_pvc \
+    bash "${SCRIPT_DIR}/setup-registry.sh" \
+      --config "$CONFIG_FILE" \
+      --state  "$STATE_FILE" \
+      --migrate-pvc \
       "${DRY_FLAG[@]}"
 }
 

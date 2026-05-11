@@ -80,30 +80,32 @@ CI (`lint` job in `.github/workflows/ci.yml`) runs `shellcheck --severity=warnin
 Pod scheduled to rk1-node3 pulled `rk1-node1:5000/test:latest` in 505ms via containerd mirror (`registries.yaml` uses IP endpoint `https://192.168.1.11:5000` so no hostname DNS needed on worker nodes). Auth credentials embedded in mirror config. Phase A HTTP registry container (docker-proxy) conflict resolved — removed from node1.
 
 ### B-09: Mount NVMe SSDs on all nodes
-**Status:** TODO  
-**Must complete before Ollama and before relocating the registry PVC.**  
-Format and mount NVMe SSD on each node; create a Kubernetes StorageClass backed by local SSD paths; relocate the registry PVC from eMMC (local-path) to SSD.
+**Status:** IMPLEMENTED — ready to run  
+**Must complete before Ollama deployment.**
 
-Steps per node:
+Hardware reality (verified 2026-05-11):
+- Nodes 1, 2, 3: TEAM TM8FPD002T 2TB NVMe, unformatted
+- Node 4: **no NVMe** — only eMMC (29.1GB); see ADR-0019 note on DB placement
+
+**Automated via `scripts/mount-ssd.sh` + `setup-registry.sh --migrate-pvc`:**
+
 ```bash
-# Identify NVMe device
-lsblk | grep nvme
+# Dry-run to preview all actions
+./scripts/bootstrap-phase-b.sh --dry-run --from B09_mount_ssd
 
-# Partition + format (adjust /dev/nvme0n1 as needed)
-sudo parted /dev/nvme0n1 mklabel gpt
-sudo parted /dev/nvme0n1 mkpart primary ext4 0% 100%
-sudo mkfs.ext4 /dev/nvme0n1p1
+# Run: format + mount nodes 1-3, deploy local-ssd StorageClass, migrate registry PVC
+./scripts/bootstrap-phase-b.sh --from B09_mount_ssd
 
-# Mount point
-sudo mkdir -p /mnt/ssd
-echo "/dev/nvme0n1p1  /mnt/ssd  ext4  defaults,noatime  0  2" | sudo tee -a /etc/fstab
-sudo mount -a
+# Or run individually
+./scripts/mount-ssd.sh                        # format + mount + StorageClass
+./scripts/setup-registry.sh --migrate-pvc     # move registry PVC to SSD (data loss ok)
 ```
 
-After all nodes are mounted:
-- Create a `local` StorageClass pointing to `/mnt/ssd/` paths
-- Recreate the registry PVC on SSD
-- Recreate `registry-tls` Secret and redeploy registry chart
+After B-09:
+- `/mnt/ssd` mounted on nodes 1-3 (UUID fstab entry, noatime, ext4)
+- `local-ssd` StorageClass backed by `/mnt/ssd/local-path-provisioner/`
+- Registry PVC on `local-ssd` (node1 SSD)
+- Node4 has no SSD — DB pod (future) must use node3 SSD or wait for SSD install
 
 See ADR-0019 for storage architecture decisions.
 
