@@ -14,13 +14,15 @@ STATE_FILE="./bootstrap-state.kv"
 CONFIG_FILE="./bootstrap-config.kv"
 SSH_KEY="${HOME}/.ssh/id_ed25519"
 DO_VERIFY=0
+DRY=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --state)  STATE_FILE="$2"; shift 2 ;;
-    --config) CONFIG_FILE="$2"; shift 2 ;;
-    --key)    SSH_KEY="$2";    shift 2 ;;
-    --verify) DO_VERIFY=1;     shift   ;;
+    --state)    STATE_FILE="$2"; shift 2 ;;
+    --config)   CONFIG_FILE="$2"; shift 2 ;;
+    --key)      SSH_KEY="$2";    shift 2 ;;
+    --verify)   DO_VERIFY=1;     shift   ;;
+    --dry-run)  DRY=1;           shift   ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
   esac
 done
@@ -86,6 +88,16 @@ PUBKEY=$(cat "${SSH_KEY}.pub")
 say "Using key: ${SSH_KEY}.pub"
 info "$PUBKEY"
 echo
+
+if (( DRY )); then
+  say "Would distribute SSH key + passwordless sudo to:"
+  for node in rk1-node1 rk1-node2 rk1-node3 rk1-node4; do
+    _ip=$(kv_get "$node" "$STATE_FILE")
+    info "$node (${_ip:-unknown}): authorized_keys + NOPASSWD sudo"
+  done
+  say "Dry-run: no changes made."
+  exit 0
+fi
 
 echo -n "Node password (NEW_PASS set during Phase A): "
 read -rs NODE_PASS

@@ -23,11 +23,13 @@ DO_CA=1
 DO_LAPTOP=1
 DO_AUTH=0
 DO_VERIFY=0
+DRY=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --config)       CONFIG_FILE="$2"; shift 2 ;;
     --state)        STATE_FILE="$2";  shift 2 ;;
+    --dry-run)      DRY=1;            shift   ;;
     --certs-only)   DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0; DO_HELM=0;
                     DO_WAIT=0; DO_CA=0; DO_LAPTOP=0; shift ;;
     --ca-only)      DO_CERTS=0; DO_STOP_OLD=0; DO_NAMESPACE=0; DO_TLS_SECRET=0;
@@ -90,6 +92,10 @@ stage_prereqs() {
 # ---- stage: certs -----------------------------------------------------------
 
 stage_certs() {
+  if (( DRY )); then
+    info "[dry-run] Would generate registry TLS certs in ${CERT_DIR}/"
+    return 0
+  fi
   if [[ -f "${CERT_DIR}/registry.crt" ]]; then
     info "Certs already exist at ${CERT_DIR}/registry.crt — skipping generation."
     return 0
@@ -102,6 +108,10 @@ stage_certs() {
 
 stage_stop_old() {
   say "Removing Phase A Docker registry container on ${SERVER_NODE} (if present)…"
+  if (( DRY )); then
+    info "[dry-run] Would run: sudo docker stop registry && sudo docker rm registry on ${SERVER_IP}"
+    return 0
+  fi
   node_ssh "$SERVER_IP" \
     "sudo docker stop registry 2>/dev/null || true; sudo docker rm registry 2>/dev/null || true"
   info "Done (no-op if container was already gone)."
@@ -111,6 +121,10 @@ stage_stop_old() {
 
 stage_namespace() {
   say "Ensuring namespace 'registry' exists…"
+  if (( DRY )); then
+    info "[dry-run] Would: kubectl create namespace registry"
+    return 0
+  fi
   kubectl create namespace registry --dry-run=client -o yaml | kubectl apply -f -
 }
 
@@ -118,6 +132,10 @@ stage_namespace() {
 
 stage_tls_secret() {
   say "Creating/updating TLS secret 'registry-tls' in namespace 'registry'…"
+  if (( DRY )); then
+    info "[dry-run] Would create secret registry-tls from ${CERT_DIR}/registry.{crt,key}"
+    return 0
+  fi
   [[ -f "${CERT_DIR}/registry.crt" ]] || err "registry.crt not found in ${CERT_DIR}. Run --certs-only first."
   [[ -f "${CERT_DIR}/registry.key" ]] || err "registry.key not found in ${CERT_DIR}."
   kubectl create secret tls registry-tls \
@@ -132,6 +150,10 @@ stage_tls_secret() {
 
 stage_helm_install() {
   say "Deploying registry Helm chart…"
+  if (( DRY )); then
+    info "[dry-run] Would: helm upgrade --install registry charts/registry -n registry (nodeSelector: ${SERVER_NODE})"
+    return 0
+  fi
   helm upgrade --install registry "$(dirname "$0")/../charts/registry" \
     -n registry \
     --set auth.enabled=false \
@@ -145,6 +167,10 @@ stage_helm_install() {
 
 stage_wait_pod() {
   say "Waiting for registry pod to be Ready (up to 120s)…"
+  if (( DRY )); then
+    info "[dry-run] Would poll until registry pod Ready"
+    return 0
+  fi
   kubectl wait --for=condition=ready pod \
     -l app=registry \
     -n registry \
@@ -159,6 +185,9 @@ stage_ca_distribute() {
   install_ca="$(dirname "$0")/install-ca.sh"
   [[ -x "$install_ca" ]] || chmod +x "$install_ca"
 
+  local dry_flag=()
+  (( DRY )) && dry_flag=(--dry-run)
+
   for (( i=1; i<=NODE_COUNT; i++ )); do
     local node_ip
     node_ip=$(ip_add "$TPI_BASE" "$i")
@@ -166,7 +195,8 @@ stage_ca_distribute() {
     bash "$install_ca" "$node_ip" \
       --ca-cert "${CERT_DIR}/myCA.crt" \
       --registry "$REGISTRY_ADDR" \
-      --config "$CONFIG_FILE"
+      --config "$CONFIG_FILE" \
+      "${dry_flag[@]}"
   done
 }
 
@@ -174,6 +204,10 @@ stage_ca_distribute() {
 
 stage_laptop_docker_trust() {
   say "Installing CA trust on laptop Docker…"
+  if (( DRY )); then
+    info "[dry-run] Would copy ${CERT_DIR}/myCA.crt → /etc/docker/certs.d/${REGISTRY_ADDR}/ca.crt and restart docker"
+    return 0
+  fi
   local cert_dir="/etc/docker/certs.d/${REGISTRY_ADDR}"
   local src="${CERT_DIR}/myCA.crt"
   local dst="${cert_dir}/ca.crt"
@@ -193,6 +227,10 @@ stage_laptop_docker_trust() {
 
 stage_enable_auth() {
   say "Enabling registry basic auth (B-07)…"
+  if (( DRY )); then
+    info "[dry-run] Would create secret registry-htpasswd and helm upgrade with auth.enabled=true"
+    return 0
+  fi
   [[ -f "$CREDS_FILE" ]] || err "Credentials file not found: ${CREDS_FILE}"
 
   local reg_user reg_pass
@@ -228,6 +266,10 @@ stage_enable_auth() {
 
 stage_verify() {
   say "Verifying registry with a test push/pull…"
+  if (( DRY )); then
+    info "[dry-run] Would docker push/pull ${REGISTRY_ADDR}/test:latest"
+    return 0
+  fi
 
   # Log in if auth is enabled (credentials file present and auth secret exists)
   local authed=0

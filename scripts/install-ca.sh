@@ -10,6 +10,7 @@ CREDS_FILE="${HOME}/.turingpi/credentials.kv"
 CA_CERT=""
 REGISTRY_ADDR=""
 REGISTRY_IP=""
+DRY=0
 NODE_IP=""
 
 while [[ $# -gt 0 ]]; do
@@ -19,6 +20,7 @@ while [[ $# -gt 0 ]]; do
     --registry-ip)  REGISTRY_IP="$2";   shift 2 ;;
     --config)       CONFIG_FILE="$2";   shift 2 ;;
     --creds)        CREDS_FILE="$2";    shift 2 ;;
+    --dry-run)      DRY=1;              shift   ;;
     -*)             echo "Unknown flag: $1"; exit 1 ;;
     *)              NODE_IP="$1";       shift ;;
   esac
@@ -74,10 +76,15 @@ fi
 # ---- copy CA cert -----------------------------------------------------------
 
 say "Copying CA cert to ${NODE_IP}…"
-node_scp "$CA_CERT" /tmp/registry-ca.crt
-node_ssh sudo mv /tmp/registry-ca.crt /usr/local/share/ca-certificates/registry-ca.crt
-node_ssh sudo chmod 644 /usr/local/share/ca-certificates/registry-ca.crt
-node_ssh sudo update-ca-certificates
+if (( DRY )); then
+  info "[dry-run] Would scp $CA_CERT → ubuntu@${NODE_IP}:/usr/local/share/ca-certificates/registry-ca.crt"
+  info "[dry-run] Would run: sudo update-ca-certificates"
+else
+  node_scp "$CA_CERT" /tmp/registry-ca.crt
+  node_ssh sudo mv /tmp/registry-ca.crt /usr/local/share/ca-certificates/registry-ca.crt
+  node_ssh sudo chmod 644 /usr/local/share/ca-certificates/registry-ca.crt
+  node_ssh sudo update-ca-certificates
+fi
 
 # ---- write containerd mirror config -----------------------------------------
 
@@ -103,7 +110,12 @@ if [[ -f "$CREDS_FILE" ]]; then
   fi
 fi
 
-node_ssh sudo tee /etc/rancher/k3s/registries.yaml > /dev/null <<EOF
+if (( DRY )); then
+  info "[dry-run] Would write /etc/rancher/k3s/registries.yaml"
+  info "[dry-run]   mirror: ${REG_ADDR} → ${ENDPOINT_URL}"
+  [[ -n "$AUTH_BLOCK" ]] && info "[dry-run]   with auth credentials from ${CREDS_FILE}"
+else
+  node_ssh sudo tee /etc/rancher/k3s/registries.yaml > /dev/null <<EOF
 mirrors:
   "${REG_ADDR}":
     endpoint:
@@ -114,26 +126,31 @@ configs:
       ca_file: "/usr/local/share/ca-certificates/registry-ca.crt"
 ${AUTH_BLOCK}
 EOF
+fi
 
 # ---- restart k3s or k3s-agent -----------------------------------------------
 
 say "Detecting k3s service type on ${NODE_IP}…"
-SVC=$(node_ssh "if systemctl is-active k3s &>/dev/null; then echo k3s; \
-               elif systemctl is-active k3s-agent &>/dev/null; then echo k3s-agent; \
-               else echo none; fi")
+if (( DRY )); then
+  info "[dry-run] Would restart k3s or k3s-agent on ${NODE_IP}"
+else
+  SVC=$(node_ssh "if systemctl is-active k3s &>/dev/null; then echo k3s; \
+                 elif systemctl is-active k3s-agent &>/dev/null; then echo k3s-agent; \
+                 else echo none; fi")
 
-case "$SVC" in
-  k3s)
-    info "Server node — restarting k3s."
-    node_ssh sudo systemctl restart k3s
-    ;;
-  k3s-agent)
-    info "Agent node — restarting k3s-agent."
-    node_ssh sudo systemctl restart k3s-agent
-    ;;
-  *)
-    err "Neither k3s nor k3s-agent is active on ${NODE_IP}. Is k3s installed?"
-    ;;
-esac
+  case "$SVC" in
+    k3s)
+      info "Server node — restarting k3s."
+      node_ssh sudo systemctl restart k3s
+      ;;
+    k3s-agent)
+      info "Agent node — restarting k3s-agent."
+      node_ssh sudo systemctl restart k3s-agent
+      ;;
+    *)
+      err "Neither k3s nor k3s-agent is active on ${NODE_IP}. Is k3s installed?"
+      ;;
+  esac
+fi
 
 say "Done: CA installed and containerd mirror configured on ${NODE_IP}."

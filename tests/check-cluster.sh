@@ -202,28 +202,32 @@ for (( i=1; i<=NODE_COUNT; i++ )); do
   kubectl run "$pod" \
     --image="${TEST_IMAGE}" \
     --restart=Never \
-    --overrides="$overrides" \
-    -- sh -c "exit 0" &>/dev/null
+    --overrides="$overrides" &>/dev/null
 
-  phase=""
-  deadline=$(( $(date +%s) + 90 ))
+  # We care about the image pull, not the container exit code.
+  # Wait up to 60s for either "Successfully pulled" or a pull failure event.
+  pulled=0
+  pull_err=""
+  deadline=$(( $(date +%s) + 60 ))
   while [[ $(date +%s) -lt $deadline ]]; do
-    phase=$(kubectl get pod "$pod" --no-headers 2>/dev/null | awk '{print $3}')
-    [[ "$phase" == "Succeeded" || "$phase" == "Error" || "$phase" == "Failed" ]] && break
+    events=$(kubectl describe pod "$pod" 2>/dev/null)
+    if echo "$events" | grep -q "Successfully pulled"; then
+      pulled=1; break
+    fi
+    if echo "$events" | grep -qE "ImagePullBackOff|ErrImagePull|failed to pull"; then
+      pull_err=$(echo "$events" | grep -E "ImagePullBackOff|ErrImagePull|failed to pull" | head -1)
+      break
+    fi
     sleep 2
   done
 
-  if [[ "$phase" == "Succeeded" ]]; then
+  kubectl delete pod "$pod" --ignore-not-found &>/dev/null
+
+  if (( pulled )); then
     pass "$check"
   else
-    reason=$(kubectl get events \
-      --field-selector "involvedObject.name=${pod}" \
-      --sort-by='.lastTimestamp' \
-      -o jsonpath='{.items[-1].message}' 2>/dev/null || true)
-    fail "$check" "phase=${phase:-timeout}; ${reason:-no events}"
+    fail "$check" "${pull_err:-pull timed out or no events}"
   fi
-
-  kubectl delete pod "$pod" --ignore-not-found &>/dev/null
 done
 
 # ── summary ───────────────────────────────────────────────────────────────────

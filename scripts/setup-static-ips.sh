@@ -23,6 +23,7 @@ CONFIG_FILE="./bootstrap-config.kv"
 DO_NODES=1
 DO_BMC=1
 DO_VERIFY=0
+DRY=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -31,6 +32,7 @@ while [[ $# -gt 0 ]]; do
     --nodes-only) DO_BMC=0;         shift   ;;
     --bmc-only)   DO_NODES=0;       shift   ;;
     --verify)     DO_VERIFY=1; DO_NODES=0; DO_BMC=0; shift ;;
+    --dry-run)    DRY=1;            shift   ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
   esac
 done
@@ -61,7 +63,8 @@ ip_add() {
 
 poll_ssh() {
   local user="$1" pass="$2" ip="$3" timeout_s="$4"
-  local deadline=$(( $(date +%s) + timeout_s ))
+  local deadline
+  deadline=$(( $(date +%s) + timeout_s ))
   while (( $(date +%s) < deadline )); do
     sleep 3
     if sshpass -p "$pass" ssh \
@@ -120,6 +123,12 @@ if (( DO_NODES )); then
   done
 fi
 echo
+
+if (( DRY )); then
+  say "Dry-run: no changes made."
+  exit 0
+fi
+
 echo "Press Enter to continue or Ctrl-C to abort."
 read -r
 

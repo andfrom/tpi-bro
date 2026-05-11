@@ -23,6 +23,7 @@ DO_SERVER=1
 DO_AGENTS=1
 DO_KUBECONFIG=1
 DO_VERIFY=0
+DRY=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -32,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     --server-only)  DO_AGENTS=0; DO_KUBECONFIG=0; shift ;;
     --kubeconfig)   DO_SERVER=0; DO_AGENTS=0;      shift ;;
     --verify)       DO_VERIFY=1; DO_SERVER=0; DO_AGENTS=0; DO_KUBECONFIG=0; shift ;;
+    --dry-run)      DRY=1; DO_VERIFY=0; shift ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
   esac
 done
@@ -106,6 +108,13 @@ fi
 install_server() {
   say "Installing k3s server on $SERVER_NODE ($SERVER_IP)…"
 
+  if (( DRY )); then
+    info "[dry-run] Would install k3s server on $SERVER_NODE ($SERVER_IP)"
+    info "[dry-run] TLS SANs: $SERVER_NODE, $SERVER_IP"
+    info "[dry-run] Would wait up to 120s for k3s to become active"
+    return 0
+  fi
+
   local already
   already=$(node_ssh "$SERVER_IP" \
     "systemctl is-active k3s 2>/dev/null || true")
@@ -150,6 +159,12 @@ get_token() {
 
 install_agents() {
   local token="$1"
+
+  if (( DRY )); then
+    say "[dry-run] Would join ${#AGENT_NODES[@]} agent nodes: ${AGENT_NODES[*]}"
+    return 0
+  fi
+
   for node in "${AGENT_NODES[@]}"; do
     local idx="${node##*-node}"
     local ip
@@ -181,6 +196,12 @@ install_agents() {
 
 wait_nodes_ready() {
   say "Waiting for all nodes to be Ready (up to 5 min)…"
+
+  if (( DRY )); then
+    info "[dry-run] Would poll until $NODE_COUNT/$NODE_COUNT nodes Ready"
+    return 0
+  fi
+
   local deadline
   deadline=$(( $(date +%s) + 300 ))
   while (( $(date +%s) < deadline )); do
@@ -205,6 +226,13 @@ wait_nodes_ready() {
 
 setup_kubeconfig() {
   say "Fetching kubeconfig from $SERVER_NODE…"
+
+  if (( DRY )); then
+    info "[dry-run] Would fetch /etc/rancher/k3s/k3s.yaml from $SERVER_NODE"
+    info "[dry-run] Would write ~/.kube/config (server: ${SERVER_URL})"
+    return 0
+  fi
+
   mkdir -p ~/.kube
   [[ -f ~/.kube/config ]] && cp ~/.kube/config ~/.kube/config.bak \
     && info "Existing config backed up to ~/.kube/config.bak"
