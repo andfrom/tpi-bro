@@ -9,7 +9,7 @@
 #   ./tests/run-ci.sh --suite 2        # mock only
 
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 # Prevent auto-loading of ./bootstrap-config.kv and ./bootstrap-state.kv during
 # tests — each test that needs config/state isolation passes its own files explicitly.
@@ -22,13 +22,13 @@ FIXTURES="./tests/fixtures"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0; FAIL=0; SKIP=0
+PASS=0; FAIL=0
 SUITE="${1:-all}"
 if [[ "${1:-}" == "--suite" ]]; then SUITE="${2:-all}"; fi
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 
 run_test() {
   # run_test NAME EXPECT_RC MUST_CONTAIN MUST_NOT_CONTAIN [cmd args...]

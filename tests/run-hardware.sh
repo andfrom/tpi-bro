@@ -19,7 +19,7 @@
 #   --dry-run            Print what would be done without touching hardware
 
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 BOOTSTRAP="./scripts/bootstrap-turingpi-cluster.exp"
 TEARDOWN="./scripts/teardown-cluster.exp"

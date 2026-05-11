@@ -9,7 +9,7 @@
 #   ./tests/check-cluster.sh --creds FILE     # override credentials file
 
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 CONFIG_FILE="./bootstrap-config.kv"
 CREDS_FILE="${HOME}/.turingpi/credentials.kv"
