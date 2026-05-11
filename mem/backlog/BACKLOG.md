@@ -80,8 +80,7 @@ CI (`lint` job in `.github/workflows/ci.yml`) runs `shellcheck --severity=warnin
 Pod scheduled to rk1-node3 pulled `rk1-node1:5000/test:latest` in 505ms via containerd mirror (`registries.yaml` uses IP endpoint `https://192.168.1.11:5000` so no hostname DNS needed on worker nodes). Auth credentials embedded in mirror config. Phase A HTTP registry container (docker-proxy) conflict resolved — removed from node1.
 
 ### B-09: Mount NVMe SSDs on all nodes
-**Status:** DONE (2026-05-11)  
-**Must complete before Ollama deployment.**
+**Status:** DONE (2026-05-11)
 
 Hardware reality (verified 2026-05-11):
 - Nodes 1, 2, 3: TEAM TM8FPD002T 2TB NVMe, unformatted

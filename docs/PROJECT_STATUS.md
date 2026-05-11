@@ -1,6 +1,6 @@
 # tpi-bro — Project Status
 
-_Last updated: 2026-05-11 (B-07 auth, B-08 pod pull — done)_
+_Last updated: 2026-05-11 (B-09 NVMe mount + local-ssd StorageClass — done)_
 
 ## Summary
 
@@ -35,7 +35,7 @@ tpi-bro bootstraps a TuringPi 2 board (4× RK1 ARM64 compute modules) from bare 
 
 ## Phase B — k3s + Persistent Registry
 
-**Overall: B0–B2 + B-07 + B-08 COMPLETE**
+**Overall: B0–B2 + B-07 + B-08 + B-09 COMPLETE**
 
 Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Expect script's job ends at A7.
 
@@ -52,7 +52,7 @@ Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Ex
 | B2-verify | `docker push` + `docker pull` from laptop verified end-to-end | `setup-registry.sh --verify` | **Done** 2026-05-11 |
 | B2-auth | Registry basic auth (`auth.enabled=true` + htpasswd Secret from `~/.turingpi/credentials.kv`) | `setup-registry.sh --enable-auth` | **Done** 2026-05-11 |
 | B2-pod-pull | k3s pod on rk1-node3 pulled `rk1-node1:5000/test:latest` in 505ms via containerd mirror | `kubectl run test-pull …` | **Done** 2026-05-11 |
-| B3-ssd | Mount NVMe SSD on all nodes; move registry PVC from eMMC to SSD (blocker for Ollama) | manual (see BACKLOG.md B-09) | **Next** |
+| B3-ssd | Mount NVMe SSD on nodes 1–3; `local-ssd` StorageClass; registry PVC migrated to SSD | `mount-ssd.sh` + `setup-registry.sh --migrate-pvc` | **Done** 2026-05-11 |
 | B4-gitops | Argo CD or Flux install + platform repo structure | — | Not started |
 | B5-metallb | MetalLB for stable registry VIP | — | Not started |
 
@@ -105,8 +105,8 @@ Prerequisite: `helm` must be installed on the laptop (see `docs/PREREQUISITES.md
 ### Cluster health check (Suite 4)
 
 ```bash
-./tests/check-cluster.sh          # 10 checks: nodes Ready, registry pod, TLS, auth, push, per-node pod pull
-./tests/check-cluster.sh --quick  # skip pod-pull checks (C07–C10)
+./tests/check-cluster.sh          # 14 checks: nodes Ready, registry, TLS, auth, push, per-node pull, storage
+./tests/check-cluster.sh --quick  # skip pod-pull checks (C07–C10); still runs storage checks C11–C14
 ```
 
 Exit 0 only if all enabled checks pass.
@@ -127,14 +127,14 @@ Exit 0 only if all enabled checks pass.
 
 ## Hardware State (as of 2026-05-11)
 
-Phase B2 complete. All 4 nodes running k3s v1.35.4+k3s1 with containerd 2.2.3. Persistent HTTPS registry deployed and verified.
+Phase B complete (B0–B9). All 4 nodes running k3s v1.35.4+k3s1 with containerd 2.2.3. Persistent HTTPS registry on SSD. `local-ssd` StorageClass available cluster-wide.
 
 | Node | Hostname | Static IP | Status |
 |------|----------|-----------|--------|
-| 1 | rk1-node1 | 192.168.1.11 | k3s server; persistent HTTPS registry running (auth enabled); Phase A Docker container removed |
-| 2 | rk1-node2 | 192.168.1.12 | k3s agent |
-| 3 | rk1-node3 | 192.168.1.13 | k3s agent |
-| 4 | rk1-node4 | 192.168.1.14 | k3s agent |
+| 1 | rk1-node1 | 192.168.1.11 | k3s server; HTTPS registry (auth enabled); 2TB NVMe mounted `/mnt/ssd`; labeled `storage.tpi-bro/nvme=true` |
+| 2 | rk1-node2 | 192.168.1.12 | k3s agent; 2TB NVMe mounted `/mnt/ssd`; labeled `storage.tpi-bro/nvme=true` |
+| 3 | rk1-node3 | 192.168.1.13 | k3s agent; 2TB NVMe mounted `/mnt/ssd`; labeled `storage.tpi-bro/nvme=true` |
+| 4 | rk1-node4 | 192.168.1.14 | k3s agent; eMMC only (no NVMe); excluded from `local-ssd` provisioner |
 
 Static IPs configured via netplan (nodes) + ifupdown (BMC). Persist across reboots. DHCP drift no longer a concern.
 
@@ -146,9 +146,9 @@ IPs, MACs, and other operational details are in `bootstrap-state.kv` (gitignored
 
 ## Immediate Next Steps
 
-1. **B-09: Mount NVMe SSDs** on all nodes and move the registry PVC from eMMC (`local-path`) to SSD. **Blocker for Ollama deployment.** See `mem/backlog/BACKLOG.md` B-09 for commands.
-2. **Ollama deployment** — one instance per node, weights on local SSD, nodeSelector pinning.
-3. **GitOps controller** — Argo CD or Flux; platform repo structure. User confirmed this should happen before returning to `sibling-app`.
-4. **`sibling-app` Agent A deployment** — initial agent Deployment on node1 after GitOps is in place.
+1. **Ollama deployment (D-01)** — one instance per node, model weights on local SSD (`local-ssd` StorageClass), `nodeAffinity: storage.tpi-bro/nvme=true`.
+2. **GitOps controller** — Argo CD or Flux; platform repo structure.
+3. **`sibling-app` Agent A deployment (D-02)** — initial agent Deployment on node1 after GitOps is in place.
+4. **MetalLB (B-05 / C-01)** — stable registry VIP; removes the HostPort-forced node1 pin.
 
 See `docs/DEPLOYMENT_STATUS.md` for the full current cluster state and `mem/backlog/BACKLOG.md` for the ordered backlog.

@@ -43,12 +43,14 @@ jobs:
       - name: shellcheck — Phase B scripts
         run: |
           shellcheck --severity=warning \
+            scripts/bootstrap-phase-b.sh \
             scripts/setup-static-ips.sh \
             scripts/setup-ssh-keys.sh \
             scripts/install-k3s.sh \
             scripts/gen-registry-certs.sh \
             scripts/install-ca.sh \
-            scripts/setup-registry.sh
+            scripts/setup-registry.sh \
+            scripts/mount-ssd.sh
 
       - name: shellcheck — test runners
         run: shellcheck --severity=warning tests/run-ci.sh tests/run-hardware.sh tests/check-cluster.sh

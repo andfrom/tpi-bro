@@ -230,6 +230,42 @@ for (( i=1; i<=NODE_COUNT; i++ )); do
   fi
 done
 
+# ── C11–C14: B-09 storage checks ─────────────────────────────────────────────
+
+echo ""
+echo "Storage (B-09)"
+
+sc_provisioner=$(kubectl get sc local-ssd -o jsonpath='{.provisioner}' 2>/dev/null || echo "")
+sc_binding=$(kubectl get sc local-ssd -o jsonpath='{.volumeBindingMode}' 2>/dev/null || echo "")
+if [[ "$sc_provisioner" == "rancher.io/local-path-ssd" && "$sc_binding" == "WaitForFirstConsumer" ]]; then
+  pass "C11 local-ssd-storageclass"
+else
+  fail "C11 local-ssd-storageclass" "provisioner=${sc_provisioner:-not found}, bindingMode=${sc_binding:-unknown}"
+fi
+
+prov_ready=$(kubectl get deploy local-ssd-provisioner -n kube-system \
+  -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+if [[ "${prov_ready:-0}" -ge 1 ]]; then
+  pass "C12 local-ssd-provisioner-ready"
+else
+  fail "C12 local-ssd-provisioner-ready" "readyReplicas=${prov_ready:-0}"
+fi
+
+nvme_nodes=$(kubectl get nodes -l storage.tpi-bro/nvme=true --no-headers 2>/dev/null | grep -c "" || true)
+if [[ "$nvme_nodes" -ge 1 ]]; then
+  pass "C13 nvme-node-label (${nvme_nodes} node(s))"
+else
+  fail "C13 nvme-node-label" "no nodes with storage.tpi-bro/nvme=true"
+fi
+
+pvc_sc=$(kubectl get pvc registry-data -n registry \
+  -o jsonpath='{.spec.storageClassName}' 2>/dev/null || echo "")
+if [[ "$pvc_sc" == "local-ssd" ]]; then
+  pass "C14 registry-pvc-on-ssd"
+else
+  fail "C14 registry-pvc-on-ssd" "storageClass=${pvc_sc:-not found}"
+fi
+
 # ── summary ───────────────────────────────────────────────────────────────────
 
 echo ""

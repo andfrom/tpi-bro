@@ -1,6 +1,6 @@
 # tpi-bro — Deployment Status
 
-_Last updated: 2026-05-11 (B-07/B-08 complete)_
+_Last updated: 2026-05-11 (B-09 NVMe mount + local-ssd StorageClass complete)_
 
 ## Cluster Hardware
 
@@ -20,10 +20,10 @@ _Last updated: 2026-05-11 (B-07/B-08 complete)_
 
 | Node | Hostname | IP | Role |
 |------|----------|----|------|
-| 1 | rk1-node1 | 192.168.1.11 | k3s server + persistent registry + future Agent A LLM agent |
-| 2 | rk1-node2 | 192.168.1.12 | k3s agent — future LLM agent |
-| 3 | rk1-node3 | 192.168.1.13 | k3s agent — future LLM agent |
-| 4 | rk1-node4 | 192.168.1.14 | k3s agent — RAG / vector DB / supporting infra |
+| 1 | rk1-node1 | 192.168.1.11 | k3s server + persistent registry; 2TB NVMe |
+| 2 | rk1-node2 | 192.168.1.12 | k3s agent; 2TB NVMe |
+| 3 | rk1-node3 | 192.168.1.13 | k3s agent; 2TB NVMe |
+| 4 | rk1-node4 | 192.168.1.14 | k3s agent; eMMC only (no NVMe) |
 
 ## Software Stack
 
@@ -35,7 +35,8 @@ _Last updated: 2026-05-11 (B-07/B-08 complete)_
 | Orchestrator | k3s v1.35.4+k3s1 | Running (node1 server, nodes 2–4 agents) |
 | GitOps | Argo CD or Flux (TBD) | Not installed |
 | Registry (Phase A) | registry:2 container, HTTP, port 5000 | Stopped (replaced by Phase B) |
-| Registry (Phase B) | Helm chart (`charts/registry/`), TLS + basic auth | **Running** on node1 (HostPort 5000, PVC 50Gi local-path) |
+| Registry (Phase B) | Helm chart (`charts/registry/`), TLS + basic auth | **Running** on node1 (HostPort 5000, PVC 50Gi local-ssd) |
+| Storage | `local-ssd` StorageClass (rancher.io/local-path-ssd, WaitForFirstConsumer) | **Running** in kube-system; scoped to nodes 1–3 (NVMe only) |
 | LLM runtime | Ollama | Not installed |
 | Ingress | Traefik (k3s built-in) | Running (k3s default) |
 
@@ -88,8 +89,20 @@ containerd mirror config on each node includes the credentials in `/etc/rancher/
 Mirror endpoint uses the server IP (`192.168.1.11:5000`) so worker nodes don't need hostname DNS for `rk1-node1`.  
 Re-run `./scripts/setup-registry.sh --ca-only` after changing the password to push updated credentials to all nodes.
 
+## NVMe Storage
+
+| Node | Device | Mount | Storage Class |
+|------|--------|-------|---------------|
+| rk1-node1 | TEAM TM8FPD002T 2TB | `/mnt/ssd` (ext4, noatime, UUID fstab) | `local-ssd` provisioner |
+| rk1-node2 | TEAM TM8FPD002T 2TB | `/mnt/ssd` (ext4, noatime, UUID fstab) | `local-ssd` provisioner |
+| rk1-node3 | TEAM TM8FPD002T 2TB | `/mnt/ssd` (ext4, noatime, UUID fstab) | `local-ssd` provisioner |
+| rk1-node4 | — (no NVMe) | — | excluded from `local-ssd` |
+
+All three NVMe nodes are labeled `storage.tpi-bro/nvme=true`. Workloads express storage requirements as a capability (`storageClassName: local-ssd`) rather than a hostname pin — k3s schedules dynamically to any SSD-capable node via `WaitForFirstConsumer` binding. See `mem/adr/ADR-0019-storage-architecture.md`.
+
+Registry PVC `registry-data` is on `local-ssd` (node1, co-located with HostPort 5000). The HostPort-forced node1 pin is temporary; will be removed when MetalLB is in place (C-01).
+
 ## Known Issues
 
 - `turingpi.local` mDNS resolution can fail when only WiFi is available on some networks; fall back to using the static IP `192.168.1.10` directly
 - Ubuntu 24.04.1 LTS enforces a mandatory password change on first boot; the bootstrap script handles this automatically via `unlock_expired_password`
-- Registry PVC is currently backed by eMMC via local-path. Must be moved to SSD (B-09) before Ollama deployment to avoid storage bottleneck.
