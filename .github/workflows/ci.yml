@@ -73,3 +73,19 @@ jobs:
 
       - name: helm template — ollama chart (verify render)
         run: helm template ollama-node1 charts/ollama/ --set nodeName=rk1-node1 > /dev/null
+
+      - name: helm repo — prometheus-community (for monitoring values)
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update prometheus-community
+
+      - name: helm template — monitoring values (verify render against upstream chart)
+        run: helm template test-release prometheus-community/kube-prometheus-stack -f charts/monitoring/values.yaml > /dev/null
+
+      - name: Install kubectl (for manifest dry-run)
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+      - name: kubectl dry-run — manifests/
+        run: kubectl apply --dry-run=client -f manifests/
