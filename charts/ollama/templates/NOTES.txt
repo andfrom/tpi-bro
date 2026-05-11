@@ -1,0 +1,14 @@
+Ollama {{ .Release.Name }} deployed on {{ .Values.nodeName }}.
+
+In-cluster endpoint:
+  http://{{ .Release.Name }}.{{ .Release.Namespace }}:{{ .Values.service.port }}
+
+Pull a model:
+  kubectl exec -n {{ .Release.Namespace }} deploy/{{ .Release.Name }} -- ollama pull llama3.2:3b
+
+List loaded models:
+  kubectl exec -n {{ .Release.Namespace }} deploy/{{ .Release.Name }} -- ollama list
+
+Quick inference test:
+  kubectl exec -n {{ .Release.Namespace }} deploy/{{ .Release.Name }} -- \
+    ollama run llama3.2:3b "hello"

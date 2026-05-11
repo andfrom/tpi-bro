@@ -133,8 +133,8 @@ Document how to federate the local cluster with a cloud K8s cluster (e.g., for G
 `[BLOCKED on D-01]` Create `interactive` (value 1000) and `background` (value 100) PriorityClasses. Set resource requests + limits on all agent and Ollama pods per ADR-0008. Add a LimitRange to each namespace.
 
 ### D-01: Ollama deployment on each LLM node
-**Status:** TODO  
-Deploy Ollama via Helm or Kubernetes manifest, one instance per node, with `nodeSelector` pinning. Pull model weights from registry or volume.
+**Status:** DONE (2026-05-11)  
+`charts/ollama/` — single Helm chart, one release per NVMe node (`ollama-node1/2/3`), namespace `ollama`. Node hostname pin justified by model-weight locality (ADR-0019). PVC 200Gi `local-ssd` per instance. `scripts/install-ollama.sh` auto-detects NVMe nodes via label, deploys all three, optionally pulls models. In-cluster DNS: `ollama-node1.ollama:11434`, etc.
 
 ### D-02: Agent deployment (sibling-app Agent A)
 **Status:** TODO  

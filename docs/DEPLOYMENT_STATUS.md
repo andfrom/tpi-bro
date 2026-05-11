@@ -37,6 +37,7 @@ _Last updated: 2026-05-11 (B-09 NVMe mount + local-ssd StorageClass complete)_
 | Registry (Phase A) | registry:2 container, HTTP, port 5000 | Stopped (replaced by Phase B) |
 | Registry (Phase B) | Helm chart (`charts/registry/`), TLS + basic auth | **Running** on node1 (HostPort 5000, PVC 50Gi local-ssd) |
 | Storage | `local-ssd` StorageClass (rancher.io/local-path-ssd, WaitForFirstConsumer) | **Running** in kube-system; scoped to nodes 1–3 (NVMe only) |
+| LLM runtime | Ollama (`charts/ollama/`); one Deployment per NVMe node; 200Gi PVC `local-ssd` | **Deployed** (no models pulled yet); namespace `ollama` |
 | LLM runtime | Ollama | Not installed |
 | Ingress | Traefik (k3s built-in) | Running (k3s default) |
 

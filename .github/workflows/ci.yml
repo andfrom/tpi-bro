@@ -50,7 +50,8 @@ jobs:
             scripts/gen-registry-certs.sh \
             scripts/install-ca.sh \
             scripts/setup-registry.sh \
-            scripts/mount-ssd.sh
+            scripts/mount-ssd.sh \
+            scripts/install-ollama.sh
 
       - name: shellcheck — test runners
         run: shellcheck --severity=warning tests/run-ci.sh tests/run-hardware.sh tests/check-cluster.sh
@@ -60,3 +61,9 @@ jobs:
 
       - name: helm template — registry chart (verify render)
         run: helm template test-release charts/registry/ > /dev/null
+
+      - name: helm lint — ollama chart
+        run: helm lint charts/ollama/ --set nodeName=rk1-node1
+
+      - name: helm template — ollama chart (verify render)
+        run: helm template ollama-node1 charts/ollama/ --set nodeName=rk1-node1 > /dev/null

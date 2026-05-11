@@ -1,0 +1,31 @@
+image:
+  repository: ollama/ollama
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Required: exact node hostname (e.g. rk1-node1).
+# Justified hostname pin: avoids re-downloading 10–30 GB of model weights on
+# reschedule. See ADR-0019.
+nodeName: ""
+
+service:
+  port: 11434
+
+persistence:
+  size: 200Gi
+  storageClass: local-ssd
+
+# Environment overrides.
+# Useful values:
+#   OLLAMA_KEEP_ALIVE: how long to keep a model loaded after last request
+#                      (default 5m; set to -1 to keep forever)
+#   OLLAMA_NUM_PARALLEL: concurrent inference requests (default 1)
+extraEnv: []
+
+resources:
+  requests:
+    cpu: "2"
+    memory: "4Gi"
+  limits:
+    memory: "26Gi"
+    # No cpu limit — Ollama should burst all cores during inference.

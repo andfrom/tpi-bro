@@ -35,7 +35,7 @@ tpi-bro bootstraps a TuringPi 2 board (4× RK1 ARM64 compute modules) from bare 
 
 ## Phase B — k3s + Persistent Registry
 
-**Overall: B0–B2 + B-07 + B-08 + B-09 COMPLETE**
+**Overall: B0–B9 COMPLETE; D-01 (Ollama) DONE**
 
 Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Expect script's job ends at A7.
 
@@ -55,6 +55,7 @@ Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Ex
 | B3-ssd | Mount NVMe SSD on nodes 1–3; `local-ssd` StorageClass; registry PVC migrated to SSD | `mount-ssd.sh` + `setup-registry.sh --migrate-pvc` | **Done** 2026-05-11 |
 | B4-gitops | Argo CD or Flux install + platform repo structure | — | Not started |
 | B5-metallb | MetalLB for stable registry VIP | — | Not started |
+| D-01-ollama | Ollama on each NVMe node; one release per node; 200Gi PVC local-ssd | `install-ollama.sh` | **Done** 2026-05-11 |
 
 ### Running Phase B (orchestrated)
 
@@ -146,9 +147,10 @@ IPs, MACs, and other operational details are in `bootstrap-state.kv` (gitignored
 
 ## Immediate Next Steps
 
-1. **Ollama deployment (D-01)** — one instance per node, model weights on local SSD (`local-ssd` StorageClass), `nodeAffinity: storage.tpi-bro/nvme=true`.
-2. **GitOps controller** — Argo CD or Flux; platform repo structure.
-3. **`sibling-app` Agent A deployment (D-02)** — initial agent Deployment on node1 after GitOps is in place.
-4. **MetalLB (B-05 / C-01)** — stable registry VIP; removes the HostPort-forced node1 pin.
+1. **Pull models onto Ollama** — `./scripts/install-ollama.sh --model llama3.2:3b` (or whichever model sibling-app needs). Ollama is deployed but has no models yet.
+2. **D-00: PriorityClass + ResourceRequests** — now unblocked; add `interactive`/`background` PriorityClasses and resource requests to all agent Deployments.
+3. **D-02: `sibling-app` Agent A deployment** — FastAPI Deployment on node1, pointing at `ollama-node1.ollama:11434`.
+4. **GitOps controller** — Argo CD or Flux; platform repo structure.
+5. **MetalLB (B-05 / C-01)** — stable registry VIP; removes the HostPort-forced node1 pin.
 
 See `docs/DEPLOYMENT_STATUS.md` for the full current cluster state and `mem/backlog/BACKLOG.md` for the ordered backlog.
