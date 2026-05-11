@@ -82,7 +82,7 @@ if (( DO_BUILD )); then
     info "[dry-run] Would: docker push ${IMAGE}"
   else
     # 1. QEMU binfmt (survives until reboot; re-run after reboot automatically)
-    if ! ls /proc/sys/fs/binfmt_misc/ 2>/dev/null | grep -q qemu-aarch64; then
+    if [[ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]]; then
       say "Registering QEMU ARM64 binfmt handler…"
       docker run --privileged --rm tonistiigi/binfmt --install arm64
     else
