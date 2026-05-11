@@ -35,7 +35,7 @@ tpi-bro bootstraps a TuringPi 2 board (4× RK1 ARM64 compute modules) from bare 
 
 ## Phase B — k3s + Persistent Registry
 
-**Overall: B0–B9 COMPLETE; D-01 (Ollama) DONE**
+**Overall: B0–B9 COMPLETE; D-01 (Ollama) + D-02 (Agent A) DONE**
 
 Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Expect script's job ends at A7.
 
@@ -56,6 +56,7 @@ Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Ex
 | B4-gitops | Argo CD or Flux install + platform repo structure | — | Not started |
 | B5-metallb | MetalLB for stable registry VIP | — | Not started |
 | D-01-ollama | Ollama on each NVMe node; one release per node; 200Gi PVC local-ssd | `install-ollama.sh` | **Done** 2026-05-11 |
+| D-02-agent-a | `sibling-app` Agent A Deployment in namespace `sibling-app`; ClusterIP on 18090; arm64 cross-build via QEMU | `deploy-agent-a.sh` | **Done** 2026-05-11 |
 
 ### Running Phase B (orchestrated)
 
@@ -122,7 +123,7 @@ Exit 0 only if all enabled checks pass.
 
 ## Phase D — Multi-Agent Workloads
 
-**Overall: NOT STARTED** (blocked on Phase B)
+**Overall: D-01 + D-02 DONE**
 
 ---
 
@@ -147,10 +148,10 @@ IPs, MACs, and other operational details are in `bootstrap-state.kv` (gitignored
 
 ## Immediate Next Steps
 
-1. **Pull models onto Ollama** — `./scripts/install-ollama.sh --model llama3.2:3b` (or whichever model sibling-app needs). Ollama is deployed but has no models yet.
-2. **D-00: PriorityClass + ResourceRequests** — now unblocked; add `interactive`/`background` PriorityClasses and resource requests to all agent Deployments.
-3. **D-02: `sibling-app` Agent A deployment** — FastAPI Deployment on node1, pointing at `ollama-node1.ollama:11434`.
-4. **GitOps controller** — Argo CD or Flux; platform repo structure.
+1. **Pull models onto Ollama** — `./scripts/install-ollama.sh --model llama3.2:3b`. Ollama is deployed but has no models yet; Agent A will fail inference until a model is present.
+2. **D-00: PriorityClass + ResourceRequests** — now unblocked (D-01 done); add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
+3. **D-03: Ingress controller** — route `/agent-a/` externally; Traefik is already running (k3s built-in).
+4. **S-04: Tailscale** — external access from laptop outside home LAN.
 5. **MetalLB (B-05 / C-01)** — stable registry VIP; removes the HostPort-forced node1 pin.
 
 See `docs/DEPLOYMENT_STATUS.md` for the full current cluster state and `mem/backlog/BACKLOG.md` for the ordered backlog.
