@@ -463,3 +463,12 @@ sudo apt update && sudo apt install -y \
 ```
 
 Then install `tpi`, `kubectl`, `helm`, and `docker` separately using the steps above.
+
+---
+
+## NPU model management
+
+See [`docs/NPU-MODELS.md`](NPU-MODELS.md) for:
+- Downloading pre-converted RKNN models onto cluster nodes
+- Converting models from HuggingFace using the rknn-llm toolkit
+- Storage layout, permissions, and quantization format guide

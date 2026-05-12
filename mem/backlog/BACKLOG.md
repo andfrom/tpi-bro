@@ -266,31 +266,87 @@ Currently untested. Document gaps once hardware is available.
 ### R-01: RK3588 NPU acceleration for LLM inference
 **Status:** TODO
 
-The RK3588 has a 6 TOPS NPU per module (24 TOPS across the cluster). Ollama
-does not use it — it falls back to CPU-only inference (~3–8 tok/s for a 3B
-model). The NPU could deliver ~10–20 tok/s for the same model (3–5× speedup),
-bringing inference well inside timeout budgets and making larger models viable.
+The RK3588 has a 6 TOPS NPU per module (18 TOPS across 3 NVMe nodes). Ollama
+does not use it — CPU-only inference on `llama3.2:1b` takes ~70–150 s per
+request (warm model), making larger models impractical regardless of RAM.
+Validated 2026-05-12: llama3.2:1b on CPU produces unreliable scores (95/100
+for Profile A vs Profile B); the model is too small to apply
+a multi-criterion rubric. A 7B model on NPU is the minimum viable path.
+
+**Why RAM is not the bottleneck**  
+A 13B Q4 model (~7 GB) fits in 16 GB per node. The limit is compute throughput
+(matrix multiply) and memory bandwidth per token, not capacity. CPU NEON SIMD
+gives ~3–5 tok/s for 1B; 13B would be ~0.3 tok/s (~10 min/response). The NPU
+dedicates silicon to matrix multiply — same model should run 5–15× faster.
+
+**Model targets (estimated)**
+
+| Model     | INT4 size | Fits NPU SRAM? | Est. tok/s (NPU) |
+|-----------|-----------|----------------|------------------|
+| Llama 3.2 1B | 0.7 GB | Partially | 20–40 |
+| Llama 3.2 3B | 2 GB   | No — DRAM  | 8–15  |
+| Llama 3.1 7B | 4 GB   | No — DRAM  | 3–6   |
+
+7B is the minimum for reliable structured reasoning. 6 TOPS on DRAM-backed
+layers still beats CPU by a large margin because the compute units are faster,
+not because weights fit on-chip.
+
+**Conversion pipeline**
+
+```
+Hugging Face weights → rknn-llm conversion tool (x86 host) → .rkllm file
+                                                                    ↓
+                                              rkllm-server on RK1 node (ARM64 + NPU)
+```
+
+Conversion is a one-time step per model, runs on the laptop, produces a
+`.rkllm` file that is deployed to the cluster (e.g. via a PVC or baked into
+an image layer).
 
 **Key finding:** Rockchip's official `airockchip/rknn-llm` toolkit supports
 LLM inference on the NPU. Community projects (e.g. `rkllm-server`) wrap it
 with an Ollama-compatible HTTP API, meaning the sibling-app stack (Agent A,
 `OLLAMA_URL`) would not need changes — just swap the inference endpoint.
 
-**What the investigation involves:**
-1. Model conversion — export a GGUF model (e.g. `llama3.2:3b`) to RKNN format
-   using the rknn-llm toolkit on an x86 host; verify output on one RK1 node
+**Suggested first step (self-contained experiment)**  
+Clone `rknn-llm`, convert `llama3.2:1b` on the laptop, run `rkllm-server` on
+a single RK1 node, and score one item end-to-end. This answers the four open
+questions (model family support, JSON output stability, conversion toolchain,
+single-node latency) without touching the cluster configuration.
+
+**What the full investigation involves:**
+1. Model conversion — export `llama3.2:1b` (then 7B) to RKNN format using the
+   rknn-llm toolkit on the laptop; verify output on one RK1 node
 2. Runtime deployment — build or pull a container image with the RKNN runtime
-   + rkllm-server (Ollama-compatible API); deploy as a Kubernetes Deployment
-   on an NVMe node with the RKNN device node (`/dev/rknpu`) mounted
+   + rkllm-server; deploy as a Kubernetes Deployment on an NVMe node with the
+   RKNN device node (`/dev/rknpu`) mounted
 3. Benchmark — compare tokens/second and end-to-end scoring latency vs. current
-   CPU-only Ollama baseline; confirm < 120 s per inference at concurrency 3
+   CPU-only Ollama baseline; verify score quality with a 7B model
 4. Rollout — if viable, deploy alongside Ollama as an opt-in endpoint
    (`OLLAMA_URL` → rkllm-server ClusterIP); Ollama stays as fallback
+
+**Open questions to resolve in step 1**
+- Does rknn-llm support Llama 3.x architecture? (model-specific conversion code)
+- Does rkllm-server support `format: json` (structured output)?
+- Does the conversion toolchain run cleanly on the laptop (x86 Linux)?
+- What is realistic tok/s for 1B and 7B on a single RK1 node?
 
 **Constraints / risks:**
 - RKNN-LLM model support is limited (Llama, Qwen, Phi families confirmed;
   others need testing)
 - Model conversion requires x86 host with the rknn-llm conda environment
 - `/dev/rknpu` device must be exposed to the pod via `hostPath` volume +
-  privileged security context (or a device plugin)
+  privileged security context (or a device plugin); multiple device nodes
+  required (`/dev/dri`, `/dev/mpp_service`, `/dev/rga`, `/dev/dma_heap`) —
+  silent CPU fallback if any are missing
 - The Mali G610 GPU is NOT useful for this — NPU only
+- Multi-node: rkllm-server runs per-node; decide whether to run one per RK1
+  or pin to node1 only
+- `/mnt/ssd` is root-owned; `sudo` required for model downloads via SSH.
+  Fix: `sudo chown -R $USER:$USER /mnt/ssd/rkllm-models` after creating dir.
+- RKLLM-API-Server does not yet implement `format: json` (structured output).
+  Mitigation: strong system prompt + JSON parse-and-retry in agent-a;
+  reliable with 7B+ Instruct models without grammar sampling.
+
+**Documentation:** `docs/NPU-MODELS.md` — storage layout, download commands,
+conversion pipeline, quantization guide, planned automation script interface.
