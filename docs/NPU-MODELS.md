@@ -72,14 +72,16 @@ Llama-3.1-8B-Instruct-rk3588-w8a8_g128-opt-1-hybrid-ratio-1.0.rkllm
 
 ### Download to node1 via SSH
 
+`/mnt/ssd` is owned by root — both `mkdir` and `wget` require `sudo`:
+
 ```bash
 ssh rk1-node1 "sudo mkdir -p /mnt/ssd/rkllm-models"
 ssh rk1-node1 "sudo wget -O /mnt/ssd/rkllm-models/Llama-3.1-8B-Instruct-rk3588-w8a8_g128-opt-1-hybrid-ratio-1.0.rkllm \
   'https://huggingface.co/c01zaut/Llama-3.1-8B-Instruct-rk3588-1.1.2/resolve/main/Llama-3.1-8B-Instruct-rk3588-w8a8_g128-opt-1-hybrid-ratio-1.0.rkllm'"
 ```
 
-The download is ~8 GB. Progress is shown by wget. On a typical home connection
-this takes 5–20 minutes.
+The download is ~8.5 GB. On a fast home connection this takes ~5 minutes
+(verified: 32.9 MB/s, 4m 23s on 2026-05-12).
 
 ### Alternative: jamescallander's single-file repo
 
@@ -93,8 +95,96 @@ ssh rk1-node1 "sudo wget -O /mnt/ssd/rkllm-models/Llama-3.1-8B-Instruct_w8a8_g12
 
 ```bash
 ssh rk1-node1 "ls -lh /mnt/ssd/rkllm-models/"
-# Expected: ~8.0G for 8B W8A8
+# Expected: ~8.5G for 8B W8A8
 ```
+
+---
+
+## rkllama directory structure and Modelfile
+
+rkllama (ghcr.io/notpunchnox/rkllama) expects each model in its own
+subdirectory with a `Modelfile` alongside the `.rkllm` file:
+
+```
+/mnt/ssd/rkllm-models/
+  <model-name>/               ← directory name = model name used in API calls
+    <model-name>.rkllm        ← the converted model file
+    Modelfile                 ← required metadata file (see format below)
+```
+
+**Important:** the `.rkllm` file must be inside a subdirectory, not at the
+top level. A flat file is not recognised.
+
+### Modelfile format
+
+rkllama uses `KEY="value"` syntax, **not** the `KEY value` format used by
+Ollama. Both `FROM` and `HUGGINGFACE_PATH` are required:
+
+```
+FROM="<model-filename>.rkllm"
+HUGGINGFACE_PATH="<huggingface-repo-id>"
+```
+
+Example for the Llama 3.1 8B c01zaut port:
+
+```bash
+sudo mkdir -p /mnt/ssd/rkllm-models/Llama-3.1-8B-Instruct-rk3588-w8a8_g128-opt-1-hybrid-ratio-1.0
+
+# Move the downloaded .rkllm into the subdirectory
+sudo mv /mnt/ssd/rkllm-models/Llama-3.1-8B-Instruct-rk3588-w8a8_g128-opt-1-hybrid-ratio-1.0.rkllm \
+  /mnt/ssd/rkllm-models/Llama-3.1-8B-Instruct-rk3588-w8a8_g128-opt-1-hybrid-ratio-1.0/
+
+# Write the Modelfile
+sudo tee /mnt/ssd/rkllm-models/Llama-3.1-8B-Instruct-rk3588-w8a8_g128-opt-1-hybrid-ratio-1.0/Modelfile << 'EOF'
+FROM="Llama-3.1-8B-Instruct-rk3588-w8a8_g128-opt-1-hybrid-ratio-1.0.rkllm"
+HUGGINGFACE_PATH="c01zaut/Llama-3.1-8B-Instruct-rk3588-1.1.2"
+EOF
+```
+
+---
+
+## Running rkllama
+
+### Quick start (bare Docker, for testing)
+
+```bash
+sudo docker run -d --privileged --name rkllama \
+  -p 8080:8080 \
+  -v /mnt/ssd/rkllm-models:/opt/rkllama/models \
+  ghcr.io/notpunchnox/rkllama:main
+```
+
+Flags:
+- `--privileged` — required for NPU device access
+- `-v` — mounts model directory; models are discovered at runtime
+
+Check startup (look for "RK3588 frequencies optimized" and Flask listening):
+```bash
+sudo docker logs rkllama
+```
+
+### Verify inference
+
+```bash
+# Generate endpoint (streaming NDJSON)
+curl -s -X POST http://localhost:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{"model":"Llama-3.1-8B-Instruct-rk3588-w8a8_g128-opt-1-hybrid-ratio-1.0","prompt":"hello"}'
+
+# Chat endpoint (Ollama-compatible, stream:false for single response)
+curl -s -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"model":"Llama-3.1-8B-Instruct-rk3588-w8a8_g128-opt-1-hybrid-ratio-1.0",
+       "messages":[{"role":"user","content":"hello"}],"stream":false}'
+```
+
+### Observed performance (RK3588, 32 GB, W8A8 g128, hybrid-ratio 1.0)
+
+- First token latency: ~8–9s (includes model load on first request)
+- Generation throughput: ~1.6 tok/s
+- Prompt processing: ~13.5 tok/s
+- CPU fan: silent (NPU does the compute, not CPU cores)
+- Model stays resident between requests (no unload overhead)
 
 ---
 
