@@ -33,7 +33,8 @@ else
 fi
 
 if [[ -n "${REG_SAN_IP_CFG:-}" ]]; then
-  REG_SAN_IP=("$REG_SAN_IP_CFG")
+  # Space-separated list supported: REG_SAN_IP=192.168.1.11 <node1-tailscale-ip>
+  read -ra REG_SAN_IP <<< "$REG_SAN_IP_CFG"
 elif [[ -n "$TPI_BASE" ]]; then
   REG_SAN_IP=("$(ip_add "$TPI_BASE" "$SERVER_IDX")")
 else
