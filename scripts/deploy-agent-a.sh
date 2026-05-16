@@ -92,7 +92,8 @@ if (( DO_BUILD )); then
     # 2. docker-container buildx builder (one-time)
     if ! docker buildx inspect "$BUILDER_NAME" &>/dev/null; then
       say "Creating buildx builder '${BUILDER_NAME}'…"
-      docker buildx create --name "$BUILDER_NAME" --driver docker-container --bootstrap
+      docker buildx create --name "$BUILDER_NAME" --driver docker-container \
+        --driver-opt network=host --bootstrap
     fi
 
     # 3. Build for arm64, load into host Docker daemon
