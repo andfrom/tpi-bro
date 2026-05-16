@@ -50,7 +50,8 @@ _Last updated: 2026-05-11 (D-04 monitoring stack deployed)_
 | BMC power control | `tpi power on/off -n NODE` | Installed on laptop; works over WiFi |
 | SSH to nodes | `ssh ubuntu@rk1-node{1..4}` | After Phase A; `/etc/hosts` updated |
 | Registry push (Phase A) | `docker push rk1-node1:5000/IMAGE` | HTTP only; Docker daemon needs insecure-registries config |
-| Registry push (Phase B) | `docker push rk1-node1:5000/IMAGE` | HTTPS; CA cert must be trusted on laptop |
+| Registry push (Phase B, LAN) | `docker push rk1-node1:5000/IMAGE` | HTTPS; CA cert must be trusted on laptop |
+| Registry push (Phase B, off-LAN) | `TAILSCALE_REGISTRY_IP=<node1-tailscale-ip> make build-push` | Run `setup-offnet-access.sh` first; `make` auto-detects |
 | kubectl | `kubectl get nodes` | After k3s install; kubeconfig on node1 at `/etc/rancher/k3s/k3s.yaml` |
 
 ## Tailscale Mesh (N-01)
@@ -86,12 +87,31 @@ Verify: `./scripts/install-monitoring.sh --verify`
 
 ## Registry TLS Cert Status
 
-- **Certs generated and deployed** (2026-05-11)
-- SAN includes: `rk1-node1` (DNS) and `192.168.1.11` (IP) — matches static IP
-- Self-signed CA (`myCA.crt`) trusted by all 4 nodes and laptop Docker daemon
+- **Certs generated and deployed** (2026-05-11; updated 2026-05-16 for Tailscale SAN)
+- SAN includes: `rk1-node1` (DNS), `192.168.1.11` (LAN IP), `<node1-tailscale-ip>` (Tailscale IP)
+- Self-signed CA (`myCA.crt`) trusted by all 4 nodes and laptop Docker daemon (both LAN and Tailscale IPs)
 - `registry-tls` Secret in namespace `registry` contains `registry.crt` + `registry.key`
 - CA and cert artefacts in `registry-certs/` (gitignored)
 - Cert valid 825 days from generation; CA valid 3650 days
+- `NODE1_TAILSCALE_IP=<node1-tailscale-ip>` in `bootstrap-config.kv`
+
+### Off-network access setup (new laptop / workstation)
+
+Run once on each laptop that needs to push images or run `kubectl` off-LAN:
+
+```bash
+# 1. Trust the registry CA cert in Docker for the Tailscale registry address
+./scripts/setup-offnet-access.sh
+
+# 2. Add to sibling-app/.env:
+#    TAILSCALE_REGISTRY_IP=<node1-tailscale-ip>
+# Then export it and build:
+export TAILSCALE_REGISTRY_IP=<node1-tailscale-ip>
+cd ../sibling-app && make build-push
+```
+
+If the Tailscale IP changes (re-provisioning): update `NODE1_TAILSCALE_IP` in `bootstrap-config.kv`,
+regenerate certs with `gen-registry-certs.sh`, re-run `setup-offnet-access.sh`, and update `sibling-app/.env`.
 
 ## Laptop Requirements
 
