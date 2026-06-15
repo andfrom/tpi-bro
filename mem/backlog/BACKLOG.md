@@ -261,6 +261,95 @@ Currently untested. Document gaps once hardware is available.
 
 ---
 
+## Event-Driven Scheduling (ADR-0022)
+
+### E-01: Deploy KEDA + Redis job queue
+
+**Status:** TODO
+
+Deploy KEDA via Helm in the `keda` namespace. Deploy a single Redis instance
+(lightweight, `redis:7-alpine`) as the shared job queue. One Redis list key per
+workload type; KEDA `ScaledJob` per workload type watching its key.
+
+```bash
+helm repo add kedacore https://kedacore.github.io/charts
+helm install keda kedacore/keda --namespace keda --create-namespace
+```
+
+Redis can share the `monitoring` namespace or get its own. PVC on `local-ssd`
+for persistence across pod restarts (job queue must survive Redis restarts).
+
+### E-02: Node capability labels and bootstrap integration
+
+**Status:** TODO
+
+Add capability label detection to the node setup scripts so labels are applied
+automatically at bootstrap time and whenever a module is swapped.
+
+Labels to detect and apply (see ADR-0022):
+- `tpi-bro/npu: rk3588` — detected by presence of `/dev/rknpu` on the node
+- `tpi-bro/npu: jetson-orin-nano` — detected by presence of CUDA device nodes
+- No `tpi-bro/npu` label — CM4 or any node without an NPU device
+
+Add a `scripts/label-node-capabilities.sh` that SSHes to each node, probes for
+device nodes, and applies the appropriate labels via `kubectl label node`. Run
+automatically as part of `bootstrap-phase-b.sh` after nodes are Ready, and
+document as a required step after any module swap (HW-01).
+
+### E-03: Interruptible workload eviction init container
+
+**Status:** TODO — [BLOCKED on E-01]
+
+Implement the step-2 eviction logic from ADR-0022 as a reusable init container
+image in tagx. The init container:
+1. Queries nodes matching the parent job's `nodeAffinity` capability labels
+2. Finds running pods labelled `tpi-bro/interruptible: "true"` on those nodes
+3. Issues graceful deletes if the parent pod is pending due to resource contention
+
+Requires a ClusterRole with `pods/get`, `pods/list`, `pods/delete` and a
+ServiceAccount bound to it, scoped per namespace. Add to the whisper chart
+(W-01) as the first consumer.
+
+---
+
+## Whisper STT
+
+### W-01: Helm chart for batch STT jobs with model cache (CPU)
+
+**Status:** TODO — [BLOCKED on `tagx/whisper-stt` CPU image being pushed to the
+cluster registry]
+
+Add `charts/whisper/` — a reusable Helm chart for running Whisper transcription
+as a one-shot Kubernetes Job. Modelled on `charts/ollama/`: PVC for model weights
+on `local-ssd`, `nodeAffinity` on `storage.tpi-bro/nvme=true` to keep the model
+cache co-located with the pod.
+
+Key chart values:
+- `image.repository` / `image.tag` — caller supplies the tagx image reference
+- `model` — Whisper model size (e.g. `large-v3`)
+- `modelCache` — path inside container where `/models` is mounted (default `/models`)
+- `language`, `beamSize` — passed through as env vars to the container
+
+The chart is application-agnostic: callers specify their own namespace and audio
+input via values. tpi-bro provides the scheduling and storage pattern only.
+
+### W-02: RKNN device mount pattern for whisper-stt
+
+**Status:** TODO — [BLOCKED on W-01 + `tagx/whisper-stt:rknn` image existing]
+
+Extend `charts/whisper/` with an `rknn.enabled` flag that conditionally adds
+the required device mounts for NPU-accelerated inference:
+`/dev/rknpu`, `/dev/dri`, `/dev/mpp_service`, `/dev/rga`, `/dev/dma_heap`.
+Container security context: privileged or explicit device allowlist.
+
+With `rknn.enabled: false` (default) the chart deploys the CPU variant cleanly.
+Switching to RKNN is a single values override — no manifest changes needed.
+
+This pattern is reusable for any future RKNN-accelerated workload beyond Whisper.
+Record NPU benchmark results in `docs/NPU-MODELS.md` once measured.
+
+---
+
 ## Research
 
 ### R-01: RK3588 NPU acceleration for LLM inference

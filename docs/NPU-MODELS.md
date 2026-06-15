@@ -290,8 +290,87 @@ This script does not exist yet — see R-01 in the backlog.
 
 ---
 
+---
+
+## Whisper STT on RK3588
+
+Whisper (speech-to-text) is a much better fit for the RK3588 than large LLMs:
+models are 75 MB – 3 GB, and the LPDDR5 memory bandwidth advantage is more
+proportionally useful at this scale.
+
+### Storage convention
+
+Model weights go on the NVMe SSD, not the eMMC. Set `download_root` accordingly:
+
+```
+/mnt/ssd/whisper-models/      ← HuggingFace model cache root
+```
+
+`/mnt/ssd` is root-owned. Create the directory before first use:
+
+```bash
+sudo mkdir -p /mnt/ssd/whisper-models
+sudo chown -R $USER:$USER /mnt/ssd/whisper-models
+```
+
+### Containerisation principle
+
+All Whisper inference on the cluster runs in containers — no bare pip installs
+on nodes. The image source is the **tagx** auxiliary repo (working name; not yet
+created) which provides reusable ARM64 base images shared across projects. Until
+tagx exists, use `python:3.12-slim` for throwaway benchmarks:
+
+```bash
+sudo docker run --rm \
+  -v /mnt/ssd/whisper-models:/models \
+  -v /tmp/audio.wav:/audio/audio.wav:ro \
+  python:3.12-slim \
+  bash -c "pip install -q faster-whisper && python3 -c \"
+from faster_whisper import WhisperModel
+wm = WhisperModel('large-v3', device='cpu', compute_type='int8', download_root='/models')
+segs, info = wm.transcribe('/audio/audio.wav', beam_size=5, language='sv', vad_filter=True)
+[print(s.text.strip()) for s in segs]
+\""
+```
+
+### CPU benchmark results (2-min clip, 2026-06-15)
+
+faster-whisper/CTranslate2 is CPU-only on RK3588 — **the NPU is not used**.
+CTranslate2 has no RKNN backend; NPU inference requires a separate conversion
+pipeline (see W-02 in backlog).
+
+| Model    | Size   | Laptop AVX2 | RK3588 CPU | Slowdown |
+|----------|--------|-------------|------------|----------|
+| tiny     | 75 MB  | 9s          | TBD        | —        |
+| base     | 145 MB | 4s          | TBD        | —        |
+| small    | 462 MB | 6s          | TBD        | —        |
+| medium   | 1.5 GB | 22s         | 58s        | 2.6×     |
+| large-v3 | 3 GB   | 81s         | 93s        | 1.15×    |
+
+Laptop: HP EliteBook x360 1030 G4, Intel i7 8th gen, AVX2, int8.
+RK3588: TuringPi RK1 node, ARM64, LPDDR5 32 GB, CPU-only.
+
+**Key insight:** large-v3 gap (1.15×) is much smaller than medium (2.6×). Large
+is more memory-bandwidth-bound, where LPDDR5 narrows the gap; medium is more
+compute-bound, where AVX2 int8 dominates. For a 64-min recording, large-v3 on
+a single RK3588 node is only ~10 min slower than the laptop. Across 4 nodes in
+parallel (largest-first scheduling), wall time drops to ~40 min vs ~87 min
+serial on the laptop.
+
+### NPU inference via RKNN (planned — W-02)
+
+Whisper models can be converted to RKNN format using `rknn-toolkit2` (the STT
+toolkit, distinct from `rknn-llm`). Pre-converted Whisper RKNN models may exist
+on HuggingFace — search `whisper rknn rk3588` before converting from scratch.
+Expected speedup over CPU: 5–10×, which would put large-v3 at ~10–20s for a
+2-min clip on RK3588.
+
+**Status:** not yet attempted. See BACKLOG.md W-02.
+
+---
+
 ## See also
 
-- `mem/backlog/BACKLOG.md` — R-01: RK3588 NPU acceleration research item
+- `mem/backlog/BACKLOG.md` — R-01: RK3588 NPU acceleration research item; W-01/W-02: Whisper STT
 - `docs/PREREQUISITES.md` — cluster prerequisites before deploying rkllm-server
 - `charts/ollama/` — existing Ollama deployment (CPU-only, stays as fallback)
