@@ -1,6 +1,6 @@
 # tpi-bro — Test Status & Coverage Map
 
-_Last updated: 2026-05-10_
+_Last updated: 2026-06-16_
 
 ## Current state
 
@@ -338,3 +338,87 @@ teardown --password <current-pass>
 | A4 node timeout (never appears) | Would need hardware fault simulation |
 | T1 "no nodes found at all" → die | All nodes must be unreachable simultaneously |
 | A0 upgrade real path | Requires live BMC + firmware file; manual only |
+
+---
+
+## Coverage gaps — Phase B, D, and RKNN
+
+### Phase B shell scripts — no unit tests
+
+**Scripts:** `scripts/install-k3s.sh`, `scripts/setup-registry.sh`,
+`scripts/setup-nvme.sh`, and related helpers.
+
+**Why not automated:** these scripts mutate live cluster state (install k3s,
+configure containerd, format NVMe). Dry-run modes are not implemented. The
+existing Suite 4 (`tests/check-cluster.sh`) validates the *result* of a Phase B
+run (14 checks: node readiness, registry TLS, push/pull, NVMe mounts) but does
+not test the scripts themselves.
+
+**Manual validation:**
+```bash
+# After any change to Phase B scripts, run Suite 4 against a live cluster:
+./tests/check-cluster.sh
+# Expect: 14/14 checks passing
+```
+
+**To improve:** add `--dry-run` flags to Phase B scripts (similar to Phase A's
+Expect scripts) so output-matching tests can run without a real cluster. Add
+shellcheck to CI for static analysis.
+
+**Trigger for Suite 4:** any change to Phase B scripts; after a cluster rebuild.
+
+---
+
+### Phase D workloads — validated via sibling-app canary, not tpi-bro tests
+
+Ollama, Agent A, Agent B, and Agent C workloads running on the cluster
+are not tested here. They are validated by `make canary` / `make canary-hm` /
+`make canary-cv` in the `sibling-app` repo. Prometheus + Grafana (D-04) is validated
+manually via the Grafana UI on the Tailnet.
+
+No tpi-bro-side tests are planned for Phase D; the sibling-app canary targets are the
+right ownership boundary.
+
+---
+
+### RKNN NPU inference — manual validation only
+
+**What was validated:** Whisper medium on node1 (2026-06-16) using
+`tagx/images/whisper-stt:rknn` — encoder 10.4 s, decoder 238 s (no KV-cache),
+greedy transcription of a Swedish audio clip.
+
+**Why not automated:** requires a running RK3588 node with RKNN models at
+`/mnt/ssd/whisper-models/rknn/<model>/` and a `--privileged` container. No CI
+runner can reach the cluster.
+
+**Manual validation:**
+```bash
+# SSH to rk1-node1, then:
+docker run --privileged \
+  -v /mnt/ssd/whisper-models/rknn/medium:/models \
+  -v /tmp/test.wav:/audio/test.wav \
+  rk1-node1:5000/tagx/whisper-stt:rknn \
+  python infer_rknn.py --audio /audio/test.wav --language sv
+# Expect: transcript printed; encoder ~10 s
+```
+
+**Trigger:** `librknnrt.so` version bump (see BACKLOG E-02); kernel or driver
+update; new model size; after `tagx` container image rebuild.
+
+---
+
+### shellcheck — not in CI
+
+Phase A scripts pass shellcheck locally but it is not enforced in CI. Phase B
+scripts have not been shellchecked.
+
+**To add:**
+```yaml
+# In .github/workflows/ci.yml:
+- name: shellcheck
+  uses: ludeeus/action-shellcheck@master
+  with:
+    scandir: './scripts'
+```
+
+**Trigger:** add before the Phase C milestone.
