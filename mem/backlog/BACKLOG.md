@@ -317,7 +317,7 @@ for persistence across pod restarts (job queue must survive Redis restarts).
 
 ### E-02: Node capability labels and bootstrap integration
 
-**Status:** TODO
+**Status:** DONE (2026-06-16) — `scripts/label-node-capabilities.sh`; C15 added to `tests/check-cluster.sh`
 
 Add capability label detection to the node setup scripts so labels are applied
 automatically at bootstrap time and whenever a module is swapped.
@@ -400,23 +400,25 @@ Do not reference it in device mount lists.
 
 ### W-03: KV-cache decoder for RKNN Whisper
 
-**Status:** TODO — [BLOCKED on W-02 and tagx inference pipeline]
+**Status:** PARTIAL DONE (2026-06-16) — cross-attention KV cache implemented; self-attention KV cache deferred.
 
-The current `infer_rknn.py` decoder rescans all 448 tokens on every step
-(no KV-cache). This produces correct output but is ~240s for a 2-minute clip —
-not usable. The correct architecture splits the decoder into two RKNN models:
+Cross-attention KV pre-projection implemented in `tagx/images/whisper-stt/rknn/`:
+- `export_onnx.py --mode kv` exports three ONNX models:
+  1. Audio encoder (unchanged)
+  2. XA-KV encoder — projects audio_features to xa_k/v for all decoder layers (runs once)
+  3. Decoder-with-cached-XA — takes tokens + cached xa_k/v tensors, skips cross-attn projection
+- `convert_rknn.py --mode kv` converts all three to RKNN
+- `infer_rknn_kv.py` implements the inference loop
 
-1. **Cross-attention encoder**: runs once per audio segment, caches key/value
-   projections from the encoder output (the `xa` cross-attention input)
-2. **Autoregressive decoder**: takes 1 token + cached cross-attention KV +
-   growing self-attention KV cache → 1 logit per step
+Output verified numerically identical to standard decoder on CPU (max diff = 0.0).
+Awaiting RKNN conversion and hardware validation on node1.
 
-This requires re-exporting the ONNX with explicit KV-cache inputs/outputs and
-re-converting. Reference: AXERA-TECH/Whisper uses this split. Expected decode
-time after: <5s per 30s audio segment.
+**Expected speedup:** 24 × 2 cross-attention KV projections over 1500 frames run once
+instead of once per decode step — ~30–50× reduction in cross-attention compute per step.
 
-Write in `tagx/images/whisper-stt/rknn/` once the single-pass decoder is
-validated end-to-end.
+**Remaining:** self-attention KV cache (avoids rescanning prior self-attn tokens each step)
+would give additional speedup but requires static-shape RKNN buffers for the growing cache.
+Defer until cross-attn KV is validated on hardware and actual decode time measured.
 
 ---
 

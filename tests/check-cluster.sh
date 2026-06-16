@@ -266,6 +266,19 @@ else
   fail "C14 registry-pvc-on-ssd" "storageClass=${pvc_sc:-not found}"
 fi
 
+# ── C15: node capability labels (E-02) ───────────────────────────────────────
+
+echo ""
+echo "Node capability labels (E-02)"
+
+npu_labelled=$(kubectl get nodes -l 'tpi-bro/npu' --no-headers 2>/dev/null | wc -l | tr -d ' ')
+if [[ "$npu_labelled" -ge 1 ]]; then
+  pass "C15 npu-capability-labels (${npu_labelled} node(s) labelled)"
+else
+  fail "C15 npu-capability-labels" \
+    "no nodes with tpi-bro/npu label — run scripts/label-node-capabilities.sh"
+fi
+
 # ── summary ───────────────────────────────────────────────────────────────────
 
 echo ""
