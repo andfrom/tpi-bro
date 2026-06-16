@@ -322,13 +322,19 @@ for persistence across pod restarts (job queue must survive Redis restarts).
 Add capability label detection to the node setup scripts so labels are applied
 automatically at bootstrap time and whenever a module is swapped.
 
-Labels to detect and apply (see ADR-0022):
-- `tpi-bro/npu: rk3588` — detected by presence of `/dev/rknpu` on the node
-- `tpi-bro/npu: jetson-orin-nano` — detected by presence of CUDA device nodes
+Labels to detect and apply (see ADR-0022 and ADR-0023):
+- `tpi-bro/npu: rk3588` — RK1 module; detected via device tree model string
+  (`cat /proc/device-tree/model | grep -i "RK1"`) since `/dev/rknpu` does NOT
+  exist in DRM GEM mode (kernel 6.1 on this cluster — see ADR-0023)
+- `tpi-bro/npu: jetson-orin-nano` — Jetson module; detected by CUDA device nodes
 - No `tpi-bro/npu` label — CM4 or any node without an NPU device
 
+**Note:** ADR-0022 originally said to detect by `/dev/rknpu`. The RK3588 on
+this cluster uses DRM GEM mode (`CONFIG_ROCKCHIP_RKNPU_DRM_GEM=y`) so no
+`/dev/rknpu` exists. Use device tree model string instead.
+
 Add a `scripts/label-node-capabilities.sh` that SSHes to each node, probes for
-device nodes, and applies the appropriate labels via `kubectl label node`. Run
+NPU identity, and applies the appropriate labels via `kubectl label node`. Run
 automatically as part of `bootstrap-phase-b.sh` after nodes are Ready, and
 document as a required step after any module swap (HW-01).
 
@@ -371,18 +377,46 @@ input via values. tpi-bro provides the scheduling and storage pattern only.
 
 ### W-02: RKNN device mount pattern for whisper-stt
 
-**Status:** TODO — [BLOCKED on W-01 + `tagx/whisper-stt:rknn` image existing]
+**Status:** PARTIALLY UNBLOCKED — `tagx/whisper-stt:rknn` image exists and
+validated on node1. Exact device nodes still unknown (see ADR-0023).
 
 Extend `charts/whisper/` with an `rknn.enabled` flag that conditionally adds
-the required device mounts for NPU-accelerated inference:
-`/dev/rknpu`, `/dev/dri`, `/dev/mpp_service`, `/dev/rga`, `/dev/dma_heap`.
-Container security context: privileged or explicit device allowlist.
+NPU device mounts. Current validated approach uses `--privileged`; once ADR-0023
+resolves the exact device nodes for DRM GEM mode, replace with an explicit
+allowlist:
+
+```yaml
+# placeholder — to be updated once device nodes are confirmed
+devices:
+  - /dev/dri/renderD128   # likely the NPU render node (unconfirmed)
+  - /dev/mpp_service      # Rockchip MPP (confirmed present)
+```
 
 With `rknn.enabled: false` (default) the chart deploys the CPU variant cleanly.
-Switching to RKNN is a single values override — no manifest changes needed.
-
 This pattern is reusable for any future RKNN-accelerated workload beyond Whisper.
-Record NPU benchmark results in `docs/NPU-MODELS.md` once measured.
+
+**Note:** `/dev/rknpu` does NOT exist on this cluster (DRM GEM kernel mode).
+Do not reference it in device mount lists.
+
+### W-03: KV-cache decoder for RKNN Whisper
+
+**Status:** TODO — [BLOCKED on W-02 and tagx inference pipeline]
+
+The current `infer_rknn.py` decoder rescans all 448 tokens on every step
+(no KV-cache). This produces correct output but is ~240s for a 2-minute clip —
+not usable. The correct architecture splits the decoder into two RKNN models:
+
+1. **Cross-attention encoder**: runs once per audio segment, caches key/value
+   projections from the encoder output (the `xa` cross-attention input)
+2. **Autoregressive decoder**: takes 1 token + cached cross-attention KV +
+   growing self-attention KV cache → 1 logit per step
+
+This requires re-exporting the ONNX with explicit KV-cache inputs/outputs and
+re-converting. Reference: AXERA-TECH/Whisper uses this split. Expected decode
+time after: <5s per 30s audio segment.
+
+Write in `tagx/images/whisper-stt/rknn/` once the single-pass decoder is
+validated end-to-end.
 
 ---
 

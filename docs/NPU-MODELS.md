@@ -336,8 +336,8 @@ segs, info = wm.transcribe('/audio/audio.wav', beam_size=5, language='sv', vad_f
 ### CPU benchmark results (2-min clip, 2026-06-15)
 
 faster-whisper/CTranslate2 is CPU-only on RK3588 — **the NPU is not used**.
-CTranslate2 has no RKNN backend; NPU inference requires a separate conversion
-pipeline (see W-02 in backlog).
+CTranslate2 has no RKNN backend; NPU inference requires a separate RKNN
+conversion pipeline (see NPU section below).
 
 | Model    | Size   | Laptop AVX2 | RK3588 CPU | Slowdown |
 |----------|--------|-------------|------------|----------|
@@ -348,24 +348,58 @@ pipeline (see W-02 in backlog).
 | large-v3 | 3 GB   | 81s         | 93s        | 1.15×    |
 
 Laptop: HP EliteBook x360 1030 G4, Intel i7 8th gen, AVX2, int8.
-RK3588: TuringPi RK1 node, ARM64, LPDDR5 32 GB, CPU-only.
+RK3588: TuringPi RK1 node, ARM64, LPDDR5 32 GB, CPU-only (faster-whisper).
 
 **Key insight:** large-v3 gap (1.15×) is much smaller than medium (2.6×). Large
 is more memory-bandwidth-bound, where LPDDR5 narrows the gap; medium is more
 compute-bound, where AVX2 int8 dominates. For a 64-min recording, large-v3 on
-a single RK3588 node is only ~10 min slower than the laptop. Across 4 nodes in
-parallel (largest-first scheduling), wall time drops to ~40 min vs ~87 min
-serial on the laptop.
+a single RK3588 node is only ~10 min slower than the laptop.
 
-### NPU inference via RKNN (planned — W-02)
+### NPU inference via RKNN — medium (2026-06-16)
 
-Whisper models can be converted to RKNN format using `rknn-toolkit2` (the STT
-toolkit, distinct from `rknn-llm`). Pre-converted Whisper RKNN models may exist
-on HuggingFace — search `whisper rknn rk3588` before converting from scratch.
-Expected speedup over CPU: 5–10×, which would put large-v3 at ~10–20s for a
-2-min clip on RK3588.
+Whisper medium was converted to RKNN FP32 using `rknn-toolkit2` on an x86
+laptop (see tagx repo for conversion scripts). Validated on node1 using the
+`tagx/whisper-stt:rknn` container image.
 
-**Status:** not yet attempted. See BACKLOG.md W-02.
+**RKNN benchmark results (2-min clip, medium, 2026-06-16):**
+
+| Component | RK3588 CPU | RK3588 NPU | Notes |
+|-----------|------------|------------|-------|
+| Encoder   | ~20s (est) | **10.4s**  | Single forward pass on NPU |
+| Decoder   | —          | ~240s      | 47 steps, **no KV-cache** — not a valid benchmark |
+
+The decoder time is not meaningful. The current RKNN decoder re-runs the full
+448-token sequence on every decode step (no KV-cache). Each step takes ~5s —
+47 steps = 240s. With a KV-cache decoder (cross-attention cached after step 1,
+self-attention growing by 1 token/step), this should drop to ~1s total.
+See W-03 in backlog.
+
+**RKNN model sizes (FP32, medium):**
+
+| File | Size |
+|---|---|
+| `whisper_encoder_medium.rknn` | 634 MB |
+| `whisper_decoder_medium.rknn` | 1017 MB |
+
+Models stored at `/mnt/ssd/whisper-models/rknn/medium/` on node1.
+
+### NPU device access on this cluster
+
+The RKNPU driver is compiled into the kernel (`CONFIG_ROCKCHIP_RKNPU=y`,
+DRM GEM mode). **There is no `/dev/rknpu` device node.** The NPU is accessed
+through the DRM render subsystem. `--privileged` is required for containers
+until the exact device node mapping is confirmed (see ADR-0023).
+
+The RKNN C runtime (`librknnrt.so`) is **not** installed on nodes by default
+and is not bundled in `rknn-toolkit-lite2`. It must be either baked into the
+container image at build time or mounted from the host. The `tagx/whisper-stt:rknn`
+image downloads it from the Rockchip GitHub during build:
+
+```
+https://github.com/airockchip/rknn-toolkit2/raw/master/rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so
+```
+
+Version confirmed working: **2.3.2** (driver 0.9.7, kernel 6.1.0-1025-rockchip).
 
 ---
 
