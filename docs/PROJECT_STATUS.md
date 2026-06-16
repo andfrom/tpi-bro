@@ -1,6 +1,6 @@
 # tpi-bro — Project Status
 
-_Last updated: 2026-05-11 (B-09 NVMe mount + local-ssd StorageClass — done)_
+_Last updated: 2026-06-16 (RKNN NPU inference validated on node1; NPU-MODELS.md + ADR-0023 added)_
 
 ## Summary
 
@@ -127,6 +127,28 @@ Exit 0 only if all enabled checks pass.
 
 ---
 
+## NPU / RKNN Status (as of 2026-06-16)
+
+Initial NPU inference validated. Whisper `medium` runs on the RK3588 NPU (6 TOPS)
+via the `rknn-toolkit2` / `rknn-toolkit-lite2` pipeline.
+
+| Item | Status |
+|------|--------|
+| RKNN conversion (x86 laptop) | **Done** — `export_onnx.py` + `convert_rknn.py` in `tagx/images/whisper-stt/rknn/` |
+| RKNN inference container | **Done** — `tagx/images/whisper-stt/Dockerfile.rknn`; `rknn-toolkit-lite2` + `librknnrt.so` baked in |
+| Whisper `medium` on NPU (node1) | **Validated** — encoder 10.4s; decoder 240s no-KV-cache; Swedish confirmed |
+| KV-cache decoder (W-03) | **Not started** — current decoder is ~100× too slow; needs split export |
+| NPU device node identification | **Open** — `--privileged` used; exact render node (renderD128/129) not yet confirmed |
+| `large-v3` RKNN conversion | **Not started** — next in priority table after medium validated |
+| NPU utilisation metrics | **Not started** — no custom Prometheus exporter yet |
+
+**Key docs:**
+- `docs/NPU-MODELS.md` — benchmarks (CPU baseline + RKNN results), model sizes, device access
+- `mem/adr/ADR-0023-rknn-npu-device-access-pattern.md` — DRM GEM mode, librknnrt.so, detection
+- `tagx/mem/adr/ADR-0002-rknn-container-conventions.md` — 9 build/runtime conventions
+
+---
+
 ## Hardware State (as of 2026-05-11)
 
 Phase B complete (B0–B9). All 4 nodes running k3s v1.35.4+k3s1 with containerd 2.2.3. Persistent HTTPS registry on SSD. `local-ssd` StorageClass available cluster-wide.
@@ -148,9 +170,10 @@ IPs, MACs, and other operational details are in `bootstrap-state.kv` (gitignored
 
 ## Immediate Next Steps
 
-1. **D-00: PriorityClass + ResourceRequests** — add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
-2. **D-04: Observability** — Prometheus + Grafana; needed to tune resource requests meaningfully.
-3. **D-04: Observability** — Prometheus + Grafana; needed to tune resource requests meaningfully.
-4. **MetalLB (B-05 / C-01)** — stable registry VIP; removes the HostPort-forced node1 pin.
+1. **W-03: KV-cache decoder** — split Whisper decoder into cross-attention KV encoder (once) + per-token autoregressive decoder; expected ~100× speedup for NPU decoding.
+2. **NPU device node (E-02)** — confirm which `/dev/dri/renderD*` node the RKNN runtime uses; replace `--privileged` with explicit device mount.
+3. **large-v3 RKNN conversion** — next model in priority table after medium validated.
+4. **D-00: PriorityClass + ResourceRequests** — add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
+5. **MetalLB (B-05 / C-01)** — stable registry VIP; removes the HostPort-forced node1 pin.
 
 See `docs/DEPLOYMENT_STATUS.md` for the full current cluster state and `mem/backlog/BACKLOG.md` for the ordered backlog.

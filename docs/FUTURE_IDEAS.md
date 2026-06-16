@@ -66,6 +66,30 @@ No action needed yet — with 1–2 models this is not a problem. Worth revisiti
 
 ## NPU Utilisation
 
-**Idea:** Each RK1 module has a 6 TOPS NPU (Neural Processing Unit). This is not yet used — Ollama runs on CPU/GPU (Mali G610, which is display-only for our purposes, so effectively CPU-only). If a future Ollama version or alternative runtime (e.g., `rknn-toolkit2`) supports the RK3588 NPU for inference, this could significantly improve throughput or reduce power consumption.
+**Status (2026-06-16): initial validation done.** Whisper `medium` runs on the RK3588 NPU
+via `rknn-toolkit2` (conversion, x86) + `rknn-toolkit-lite2` (inference, ARM64). Encoder:
+10.4s NPU; decoder: ~240s (single-pass, no KV-cache — not a valid benchmark). Swedish
+transcription confirmed working on node1. See `docs/NPU-MODELS.md` for benchmarks and
+`tagx/mem/adr/ADR-0002-rknn-container-conventions.md` for the full set of build/runtime
+lessons.
 
-**Blocker:** NPU inference requires model conversion to RKNN format, which is not currently supported by standard open-weight model pipelines. Track upstream Ollama and llama.cpp for RK3588/RKNN support.
+**What is not yet done:**
+
+- **KV-cache decoder (W-03):** the current decoder rescans all 448 tokens per step
+  (~5s/step), making it ~100× slower than it should be. A split decoder (cross-attention
+  KV encoder run once + per-token autoregressive decoder) is needed before NPU decoding
+  speed is meaningful. This is the next major RKNN milestone.
+
+- **Ollama / llama.cpp on NPU:** Ollama still runs CPU-only on this cluster. There is
+  no RK3588 NPU backend in Ollama or llama.cpp as of 2026-06-16. Track upstream; do not
+  wait for it. The `rknn-toolkit2` path (convert model → RKNN → run via rknn-toolkit-lite2)
+  is the viable route for any model where a conversion script exists.
+
+- **Large-v3 and KBLab Swedish fine-tune:** `medium` is the validated pipecleaner.
+  `large-v3` and `KBLab/kb-whisper-large` are next in the conversion backlog (tagx
+  `mem/backlog/open.md`).
+
+- **NPU device node identification:** containers currently run `--privileged` because
+  the exact DRM render node (`/dev/dri/renderD128` vs `renderD129`) used by the RKNN
+  runtime has not been confirmed. Once identified via `lsof`, `--privileged` can be
+  replaced with an explicit device allowlist. See ADR-0023.

@@ -1,6 +1,6 @@
 # tpi-bro — Deployment Status
 
-_Last updated: 2026-05-11 (D-04 monitoring stack deployed)_
+_Last updated: 2026-06-16 (RKNN NPU inference validated; NPU section added)_
 
 ## Cluster Hardware
 
@@ -11,7 +11,7 @@ _Last updated: 2026-05-11 (D-04 monitoring stack deployed)_
 | RAM per node | 32 GB LPDDR5 |
 | Total cluster RAM | 128 GB |
 | GPU | Mali G610 MP4 (display / OpenCL only — not useful for LLM inference) |
-| NPU | 6 TOPS per module |
+| NPU | 6 TOPS per module; RKNN inference validated (Whisper medium on node1, 2026-06-16) |
 | Estimated power | ~10 W per module at idle |
 | Node IPs | Static: node1=192.168.1.11, node2=.12, node3=.13, node4=.14, BMC=.10 |
 | BMC hostname | `turingpi.local` (mDNS) |
@@ -42,6 +42,7 @@ _Last updated: 2026-05-11 (D-04 monitoring stack deployed)_
 | Network mesh | Tailscale 1.96.4; all 4 nodes + laptop on Tailnet; subnet routes `10.42.0.0/16` + `10.43.0.0/16` advertised via node1 | **Running** — all 3 layers done; `agent-a` exposed on Tailnet |
 | Ingress | Traefik (k3s built-in) | Running (k3s default); superseded by Tailscale operator for service exposure |
 | Observability | kube-prometheus-stack (Prometheus + Grafana + Alertmanager + node-exporter + kube-state-metrics); `charts/monitoring/values.yaml` | **Running**; namespace `monitoring`; Grafana on Tailnet |
+| NPU inference | `rknn-toolkit-lite2` + `librknnrt.so` 2.3.2; Whisper medium encoder+decoder; `tagx/whisper-stt:rknn` image | **Validated** on node1 (2026-06-16); `--privileged`; models at `/mnt/ssd/whisper-models/rknn/`; no KV-cache decoder yet (W-03) |
 
 ## Access Methods
 
