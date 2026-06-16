@@ -7,7 +7,14 @@ _Last updated: 2026-05-10_
 **Automated tests implemented.** `tests/run-ci.sh` runs 27 tests (Suites 1 + 2)
 on every push/PR via GitHub Actions — no hardware required. `tests/run-hardware.sh`
 orchestrates the full cluster-cycle verification (Suite 3) when real hardware is
-available. Phase B / C / D are not implemented and therefore not testable.
+available. `tests/check-cluster.sh` (Suite 4) tests a running Phase B cluster: 14
+checks covering node readiness, registry TLS + auth, push/pull, per-node pod pull,
+and NVMe storage.
+
+**Coverage note:** Suites 1–3 cover Phase A (bootstrap) only. Phase B shell scripts
+and Helm charts are validated by Suite 4 (manual, requires a running cluster).
+Phase C is not yet implemented. Phase D workloads (Ollama, Agent A, HM) are
+validated via `make canary` / `make canary-hm` in the `sibling-app` repo.
 
 ---
 

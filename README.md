@@ -71,8 +71,7 @@ Credentials for the registry are stored in `~/.turingpi/credentials.kv` (mode 60
 gitignored). See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for full Phase B
 status and `docs/PREREQUISITES.md` for tool requirements.
 
-**What is not yet automated:** B-09 (NVMe SSD mounting) requires manual steps per
-node before Ollama can be deployed. See `mem/backlog/BACKLOG.md` B-09 for commands.
+Phase B (k3s + persistent registry + NVMe + Ollama) and Phase D (Agent A + Agent B + monitoring) are complete. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for current state.
 
 ---
 
@@ -92,7 +91,7 @@ Among the things that were on the "wanted features" list were
 * establish a **docker registry** for storing application images, and
 * **orchestrate** all **applications** through Kubernetes (i.e., k3s actually) to be able to scale up / down applications depending on the user's current focus / need.
 
-Check out the [TODO](TODO.md) list for potential future additions to the project. Maybe you want to help out in realizing these?
+Check out the [open backlog](mem/backlog/BACKLOG.md) for open work items and future additions to the project. Maybe you want to help out in realizing these?
 
 ### Project Name
 
@@ -517,11 +516,11 @@ Once the registry is reachable and each node has a hostname and working SSH, the
 
 Everything after bootstrap is handled declaratively via Kubernetes manifests and GitOps tooling:
 
-**Phase B:** Persistent registry with TLS + basic auth, k3s install across all nodes, CA trust distribution, containerd mirror configuration. **B0–B2 + B-07 (auth) + B-08 (pod pull) are complete** as of 2026-05-11. Next: B-09 (SSD mounting, Ollama blocker), then GitOps, then multi-agent workloads. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
+**Phase B:** Persistent registry with TLS + basic auth, k3s, NVMe storage, Tailscale mesh, monitoring. **Complete** as of 2026-05-11. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
 
-**Phase C:** Local registry mirror + sync from laptop, IP resilience (static DHCP or CoreDNS), cloud expansion notes.
+**Phase C:** Local registry mirror + sync from laptop, IP resilience (static DHCP or CoreDNS), cloud expansion notes. Not started.
 
-**Phase D and beyond:** Multi-agent workloads, Ollama deployment per node, ingress, autoscaling, observability.
+**Phase D:** Multi-agent workloads, Ollama per node, observability. **D-01 (Ollama) + D-02 (sibling-app Agent A + Agent B) + D-04 (Prometheus + Grafana) complete.** RKNN NPU inference validated on node1 (Whisper medium, 2026-06-16). Next: KV-cache decoder (W-03), GitOps (B-04), MetalLB (B-05).
 
 Recommended workflow:
 1. Build & push images from CI/CD into the cluster-local registry
@@ -555,7 +554,7 @@ By drawing the line here, the system is reproducible from bare metal up through 
 | RAM per module | 32 GB LPDDR5 |
 | Total cluster RAM | 128 GB |
 | GPU | Mali G610 MP4 (OpenCL; not suitable for LLM inference) |
-| NPU | 6 TOPS per module (24 TOPS total) |
+| NPU | 6 TOPS per module (24 TOPS total); RKNN inference validated (Whisper medium, 2026-06-16) |
 | Idle power | ~10 W per module |
 
 ### LLM Placement Constraint
@@ -587,7 +586,7 @@ Supporting services (API gateway, vector DB, queue, metrics) are stateless or di
 | Argo CD / Flux | GitOps controller — reconcile cluster to Git state continuously |
 | Ollama | LLM inference runtime on each agent node |
 | Traefik | Ingress (bundled with k3s) |
-| Prometheus + Grafana | Observability (Phase D+) |
+| Prometheus + Grafana | Observability — deployed (D-04, 2026-05-11); Grafana on Tailnet |
 
 ---
 
