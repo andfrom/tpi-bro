@@ -399,7 +399,7 @@ image downloads it from the Rockchip GitHub during build:
 https://github.com/airockchip/rknn-toolkit2/raw/master/rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so
 ```
 
-Version confirmed working: **2.3.2** (driver 0.9.7, kernel 6.1.0-1025-rockchip).
+**Version confirmed working: librknnrt.so 2.3.2** on driver 0.9.7, kernel 6.1.0-1025-rockchip (confirmed 2026-06-17; earlier concern about panics was not reproduced). Models must be compiled with rknn-toolkit2 matching the runtime version — do not mix 2.2.0 compiled models with 2.3.x runtime or vice versa. Note: rkllama uses `librkllmrt.so` (RKLLM stack), not `librknnrt.so` — this version constraint applies only to RKNN-based inference (Whisper, tagx images).
 
 ---
 
