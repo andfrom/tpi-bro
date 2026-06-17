@@ -352,6 +352,63 @@ Requires a ClusterRole with `pods/get`, `pods/list`, `pods/delete` and a
 ServiceAccount bound to it, scoped per namespace. Add to the whisper chart
 (W-01) as the first consumer.
 
+### E-04: Affinity scheduling validation
+
+**Status:** TODO — [BLOCKED on E-01 (KEDA + Redis), E-02 (capability labels)]
+
+Dedicated test pass for the model affinity scheduling behaviour described in
+ADR-0027. Specific test scenarios are defined (tracked separately by owner);
+this item captures that a structured validation plan exists and must run before
+affinity is considered production-ready.
+
+At minimum the validation should cover:
+
+- A warm-node hit: job arrives, a node already has the matching model loaded,
+  scheduler places the job there without cold-start overhead.
+- A cold-start fallback: no warm node available, job is placed on a cold capable
+  node and completes correctly.
+- A mixed queue: jobs for two different model types arrive in interleaved order;
+  each is routed to the node holding the matching model rather than being
+  shuffled across nodes.
+- A saturated warm node: warm node is at capacity; job falls through to cold
+  capable node rather than queuing behind the warm one.
+
+Results should be recorded in a dedicated benchmark document with wall-clock
+times for warm vs. cold placement.
+
+### E-05: Orchestrator state management — single query model
+
+**Status:** TODO — [BLOCKED on E-01, E-02]
+
+The dispatcher that implements ADR-0026 (parallel dispatch) and ADR-0027
+(affinity) needs to know — at dispatch time — which nodes are capable, which are
+warm (model loaded), and which have free capacity. The design question is whether
+to query all nodes individually at dispatch time or to rely on a single
+authoritative state source.
+
+k3s maintains all cluster state in etcd and exposes it via the Kubernetes API
+server. A single `kubectl get pods,nodes --all-namespaces -o wide` (or
+equivalent API call) returns everything needed in one round trip: node labels
+(capability), pod labels (`tpi-bro/model-loaded`, `tpi-bro/interruptible`),
+pod phase (Running/Pending/Succeeded), and resource requests vs. allocatable.
+
+**Questions to investigate:**
+
+1. Is the k3s API server the sufficient single state source, or does the warm-
+   node label on a model-serving pod go stale before the pod actually has the
+   model in DRAM? (Startup race: pod is Running but model load takes 25s.)
+2. Should the dispatcher use a `watch` stream on pod and node events to maintain
+   an in-process state cache, or re-query on every dispatch request?
+3. At the current cluster size (4 nodes), does per-dispatch re-query latency
+   matter? At what scale does a watch-based cache become necessary?
+4. Does KEDA's internal state tracking (queue depth → replica count) overlap
+   with anything a custom dispatcher would do, or are they entirely separate
+   concerns?
+
+**Expected output:** a documented dispatch query pattern (API call(s), fields
+read, decision logic) that becomes the implementation contract for the dispatch
+layer. No per-node SSH at dispatch time — a single API server query only.
+
 ---
 
 ## Whisper STT
