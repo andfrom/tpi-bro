@@ -39,6 +39,14 @@ PEAK_GFLOPS = {
 }
 BANDWIDTH_GBPS = {("fp16", 1): 6.5, ("fp16", 3): 13.2,
                   ("int8", 1): 6.2, ("int8", 3): 12.6}
+
+# CPU compute ceiling — RK3588 8 cores, numpy/BLAS fp32 (measured 2026-06-18):
+# ~57 GFLOP/s matmul (generic ONNX-on-CPU path). Note: optimised INT8 runtimes
+# (CTranslate2/faster-whisper) achieve higher *effective* throughput — the
+# RK3588-CPU faster-whisper baseline is medium 58 s / large-v3 93 s for a 2-min
+# clip (tpi-bro NPU-MODELS.md). LPDDR5 is shared with the NPU (~same bandwidth).
+CPU_PEAK_GFLOPS = 57.0
+CPU_BANDWIDTH_GBPS = 13.0
 DISPATCH_FLOOR_MS = 0.06      # per-kernel NPU run launch (L3)
 # Host marshalling is fixed-overhead + per-byte: tiny L3 transfers see ~190 MB/s
 # effective, but bulk transfers amortize to ~560 MB/s (calibrated to Whisper's
@@ -72,10 +80,16 @@ class Workload:
     native_dtype: bool = True
     kernels: list = field(default_factory=list)
 
+    device: str = "npu"             # npu | cpu
+
     def predict(self):
-        peak = PEAK_GFLOPS[("matmul", self.precision, self.cores)]
-        peak_conv = PEAK_GFLOPS[("conv", self.precision, self.cores)]
-        bw = BANDWIDTH_GBPS[(self.precision, self.cores)] * 1e9
+        if self.device == "cpu":
+            peak = peak_conv = CPU_PEAK_GFLOPS
+            bw = CPU_BANDWIDTH_GBPS * 1e9
+        else:
+            peak = PEAK_GFLOPS[("matmul", self.precision, self.cores)]
+            peak_conv = PEAK_GFLOPS[("conv", self.precision, self.cores)]
+            bw = BANDWIDTH_GBPS[(self.precision, self.cores)] * 1e9
         eff = self.efficiency
 
         compute_ms = mem_ms = dispatch_ms = 0.0
@@ -163,6 +177,21 @@ def main():
     print("\nWith measured per-class efficiency derate:")
     _row("encoder (eff=0.82)", whisper_encoder(1, 0.82).predict(), 10373)
     _row("decoder step (eff=0.18)", whisper_decoder_step(1, 0.18).predict(), 897)
+
+    print("\n=== NPU vs CPU (same workload) ===")
+    # encoder is compute-bound and the calculator is validated there
+    enc_npu1 = whisper_encoder(1, 0.82).predict()["total_ms"]
+    enc_npu3 = whisper_encoder(3, 0.82); enc_npu3 = enc_npu3.predict()["total_ms"]
+    enc_cpu = whisper_encoder(1, 1.0); enc_cpu.device = "cpu"
+    enc_cpu = enc_cpu.predict()["total_ms"]
+    print(f"  encoder (medium):")
+    print(f"    NPU 1-core : {enc_npu1/1000:6.1f} s  (measured 10.4 s)")
+    print(f"    NPU 3-core : {enc_npu3/1000:6.1f} s")
+    print(f"    CPU 8-core : {enc_cpu/1000:6.1f} s  (fp32 BLAS, ~57 GFLOP/s)")
+    print(f"    -> NPU 1-core is {enc_cpu/enc_npu1:.1f}x CPU; 3-core {enc_cpu/enc_npu3:.1f}x")
+    print(f"  real-world anchor: faster-whisper INT8 CPU does the full 2-min clip in")
+    print(f"    58 s (medium) — optimised INT8 runtime beats generic fp32 BLAS, so the")
+    print(f"    NPU's edge over a *tuned* CPU stack is ~2x, not the raw-compute ratio.")
 
     print("\nMarshalling (decoder host set_inputs, not resident):")
     elems_in = 2 * L * FRAMES * D + 2 * L * H * CTX * HD  # XA K/V + SA cache
