@@ -89,6 +89,26 @@ shortfall is path inefficiency, not bandwidth.)
 | Sigmoid | ✅ | ✅ | 0.83→0.17 | 3-core helps (4.9×) |
 | **ScatterND (dynamic idx)** | ✅ | **❌** | — | converts but emits garbage — tagx ADR-0003 |
 
+## Layer 6 — async overlap (measured 2026-06-18)
+
+Does `init_runtime(async_mode=True)` overlap host marshalling with NPU compute?
+Steady-state per-frame wall-time, sync vs async, via `async_test.py`:
+
+| Kernel | set+get (host) | run | sync/frame | async/frame | speedup |
+|---|---|---|---|---|---|
+| matmul 2048³ | 27.7 ms | 75.7 ms | 106.0 | 103.0 | 1.03× |
+| conv 64×128² | 14.1 ms | 1.1 ms | 15.2 | 15.2 | 1.00× |
+| add 256×256² | 533.7 ms | 7.2 ms | 532.9 | 533.6 | 1.00× |
+
+**Finding: `async_mode` gives no overlap** via rknnlite's `inference()`. Per-frame
+cost stays at the serial sum `set_inputs + run + get_outputs`. To hide marshalling
+behind compute you must either (a) eliminate marshalling with the zero-copy
+resident-I/O path, (b) double-buffer manually with threads, or (c) pipeline
+across *separate* contexts/nodes. Single-context async is not a lever.
+
+(Note: a lower-level non-blocking `rknn_run` + frame management might overlap,
+but the high-level `inference()` async flag does not.)
+
 ## Derived design rules (measured)
 
 - **Prefer conv-shaped compute over matmul** on RK3588 — the matmul→exmatmul path

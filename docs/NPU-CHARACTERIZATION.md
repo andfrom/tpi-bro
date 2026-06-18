@@ -130,7 +130,7 @@ Linear scaling never holds; each kind needs a *measured* efficiency.
 |---|---|---|
 | Intra-op multi-core | does 1 op spread across 3 cores? | **op-size dependent.** Single-token decode: 1.07× on 3 cores (useless). Large ops (encoder): untested, expected better. |
 | Inter-context | 2+ models sharing the NPU — halved each, or scheduled? | untested — decides node allocation |
-| Async overlap | can host marshalling of step N+1 overlap NPU compute of step N? | **untested, high-leverage** — turns serial *sum* into pipelined *max*. `rknnlite` exposes `async_mode`. |
+| Async overlap | can host marshalling of step N+1 overlap NPU compute of step N? | **NO via rknnlite `async_mode`** (measured 2026-06-18: matmul 1.03×, conv/add 1.00×). Per-frame stays at serial sum. Overlap needs zero-copy I/O, manual double-buffering, or separate contexts/nodes. |
 | Multi-node (4× RK1) | shard across nodes | interconnect-bound — separate domain |
 
 - **Method:** sweep core_mask per op size; run concurrent contexts and measure
@@ -219,8 +219,8 @@ Open Whisper-specific cells (cost-table to fill) live in tagx
 2. **L4 operator map** — systematic single-op probes; build the support/efficiency
    table. The feasibility oracle for any future agent.
 3. **L2 ridge point** — DRAM + SRAM + host-path bandwidth; compute the ridge.
-4. **L6 async overlap** — does `async_mode` overlap marshalling with compute?
-   (Potentially turns serial-sum into pipelined-max — large structural lever.)
+4. ~~**L6 async overlap**~~ — DONE 2026-06-18: `async_mode` gives no overlap (see
+   datasheet L6). Serial cost model holds; pipeline across contexts/nodes instead.
 5. **L3 fixed overhead** — the latency floor for tiny kernels.
 6. **L7 thermal derate** — sustained-load throttle curve.
 7. **Build the calculator** — spreadsheet/script composing the above; validate
