@@ -29,6 +29,9 @@ registry-certs/
 *.cnf
 htpasswd
 
+# Scratch — local experiments, probe scripts, model/audio artifacts; never commit
+scratch/
+
 # Editor / OS
 .DS_Store
 *.swp
