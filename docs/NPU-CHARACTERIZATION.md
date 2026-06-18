@@ -225,8 +225,10 @@ Open Whisper-specific cells (cost-table to fill) live in tagx
    (60 µs NPU dispatch + ~140 µs host); native-FP16 marshalling ~190–300 MB/s
    (layout+copy bound). See datasheet L3.
 6. **L7 thermal derate** — sustained-load throttle curve.
-7. **Build the calculator** — spreadsheet/script composing the above; validate
-   against the Whisper seed cells.
+7. ~~**Build the calculator**~~ — DONE 2026-06-18: `tools/npu-bench/calculator.py`
+   composes the constants into a serial wall-clock prediction; validated against
+   Whisper (encoder 0.82 raw / 1.00 derated; decoder roofline is a 5× lower bound,
+   0.98 with the measured 0.18 efficiency; marshalling 1.00). See datasheet.
 
 ---
 

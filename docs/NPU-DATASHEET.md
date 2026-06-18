@@ -131,6 +131,30 @@ Trivial single-input Sigmoid swept ~4 B → 2 MB (FP16, single core), phase-spli
   removes only the *extra* conversion penalty; this floor remains. Only zero-copy
   resident I/O beats it.
 
+## Wall-clock calculator — validated against Whisper (`calculator.py`)
+
+Composes the constants above into a serial wall-clock prediction for any kernel
+DAG, then checks it against the directly-measured Whisper medium numbers:
+
+| Stage | roofline (eff=1) | measured | ratio | with derate | regime |
+|---|---|---|---|---|---|
+| encoder | 8489 ms | 10373 ms | 0.82 | 10350 ms (eff=0.82) → **1.00** | compute-bound |
+| decoder step | 179 ms | 897 ms | 0.20 | 881 ms (eff=0.18) → **0.98** | memory-bound |
+| set_inputs (fp32) | 998 ms | 1001 ms | **1.00** | — | host marshalling |
+| set_inputs (fp16) | 344 ms | 344 ms | **1.00** | — | host marshalling |
+
+**Reading the validation:**
+- **Compute-bound stages predict directly.** The encoder (large matmuls, M=1500)
+  lands within 18% of the raw roofline — the device model is accurate here.
+- **The roofline is a lower bound for autoregressive decode.** A single-token step
+  is memory-bound (streaming ~810 MB of weights as M=1 GEMV) and runs at only
+  ~0.18 of clean-kernel efficiency — the cost of GEMV + hundreds of tiny ops on a
+  conv-optimised NPU. Use an empirical per-class efficiency derate for such
+  workloads; the raw roofline tells you the *best case*.
+- **Marshalling predicts to 1.00** at ~557 MB/s bulk native rate (with a 1.45×
+  per-byte penalty when feeding fp32 into an fp16 model). Confirms the FP16-input
+  win and that resident I/O is the only way past the host path.
+
 ## Derived design rules (measured)
 
 - **Prefer conv-shaped compute over matmul** on RK3588 — the matmul→exmatmul path
