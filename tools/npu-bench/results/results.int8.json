@@ -1,0 +1,346 @@
+[
+  {
+    "name": "matmul_256x256x256",
+    "op": "MatMul",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "auto",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 131072,
+    "set_inputs_ms": 0.11,
+    "run_ms": 0.32,
+    "run_ms_min": 0.31,
+    "get_outputs_ms": 0.42,
+    "gflops": 107.8
+  },
+  {
+    "name": "matmul_256x256x256",
+    "op": "MatMul",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "core0_1_2",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 131072,
+    "set_inputs_ms": 0.08,
+    "run_ms": 0.35,
+    "run_ms_min": 0.34,
+    "get_outputs_ms": 0.17,
+    "gflops": 98.3
+  },
+  {
+    "name": "matmul_512x512x512",
+    "op": "MatMul",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "auto",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 524288,
+    "set_inputs_ms": 0.24,
+    "run_ms": 1.04,
+    "run_ms_min": 1.03,
+    "get_outputs_ms": 1.5,
+    "gflops": 260.0
+  },
+  {
+    "name": "matmul_512x512x512",
+    "op": "MatMul",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "core0_1_2",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 524288,
+    "set_inputs_ms": 0.28,
+    "run_ms": 1.03,
+    "run_ms_min": 0.99,
+    "get_outputs_ms": 1.13,
+    "gflops": 269.9
+  },
+  {
+    "name": "matmul_1024x1024x1024",
+    "op": "MatMul",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "auto",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 2097152,
+    "set_inputs_ms": 0.69,
+    "run_ms": 4.75,
+    "run_ms_min": 4.73,
+    "get_outputs_ms": 6.21,
+    "gflops": 454.0
+  },
+  {
+    "name": "matmul_1024x1024x1024",
+    "op": "MatMul",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "core0_1_2",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 2097152,
+    "set_inputs_ms": 0.66,
+    "run_ms": 3.91,
+    "run_ms_min": 3.9,
+    "get_outputs_ms": 6.13,
+    "gflops": 550.9
+  },
+  {
+    "name": "matmul_2048x2048x2048",
+    "op": "MatMul",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "auto",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 8388608,
+    "set_inputs_ms": 2.99,
+    "run_ms": 46.16,
+    "run_ms_min": 46.07,
+    "get_outputs_ms": 24.23,
+    "gflops": 372.9
+  },
+  {
+    "name": "matmul_2048x2048x2048",
+    "op": "MatMul",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "core0_1_2",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 8388608,
+    "set_inputs_ms": 3.15,
+    "run_ms": 30.52,
+    "run_ms_min": 30.45,
+    "get_outputs_ms": 26.41,
+    "gflops": 564.2
+  },
+  {
+    "name": "conv_64x32x32_64k3",
+    "op": "Conv",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "auto",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 131072,
+    "set_inputs_ms": 0.09,
+    "run_ms": 0.1,
+    "run_ms_min": 0.09,
+    "get_outputs_ms": 0.17,
+    "gflops": 796.4
+  },
+  {
+    "name": "conv_64x32x32_64k3",
+    "op": "Conv",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "core0_1_2",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 131072,
+    "set_inputs_ms": 0.08,
+    "run_ms": 0.08,
+    "run_ms_min": 0.08,
+    "get_outputs_ms": 0.16,
+    "gflops": 921.1
+  },
+  {
+    "name": "conv_64x64x64_64k3",
+    "op": "Conv",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "auto",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 524288,
+    "set_inputs_ms": 0.27,
+    "run_ms": 0.3,
+    "run_ms_min": 0.28,
+    "get_outputs_ms": 1.04,
+    "gflops": 1078.5
+  },
+  {
+    "name": "conv_64x64x64_64k3",
+    "op": "Conv",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "core0_1_2",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 524288,
+    "set_inputs_ms": 0.23,
+    "run_ms": 0.19,
+    "run_ms_min": 0.17,
+    "get_outputs_ms": 0.65,
+    "gflops": 1763.8
+  },
+  {
+    "name": "conv_64x128x128_64k3",
+    "op": "Conv",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "auto",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 2097152,
+    "set_inputs_ms": 0.77,
+    "run_ms": 0.99,
+    "run_ms_min": 0.98,
+    "get_outputs_ms": 5.24,
+    "gflops": 1236.9
+  },
+  {
+    "name": "conv_64x128x128_64k3",
+    "op": "Conv",
+    "suite": "l1",
+    "precision": "int8",
+    "cores": "core0_1_2",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 2097152,
+    "set_inputs_ms": 0.8,
+    "run_ms": 0.55,
+    "run_ms_min": 0.53,
+    "get_outputs_ms": 4.32,
+    "gflops": 2286.7
+  },
+  {
+    "name": "op_Softmax",
+    "op": "Softmax",
+    "suite": "ops",
+    "precision": "int8",
+    "cores": "auto",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 196608,
+    "set_inputs_ms": 0.09,
+    "run_ms": 0.87,
+    "run_ms_min": 0.86,
+    "get_outputs_ms": 0.27
+  },
+  {
+    "name": "op_Softmax",
+    "op": "Softmax",
+    "suite": "ops",
+    "precision": "int8",
+    "cores": "core0_1_2",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 196608,
+    "set_inputs_ms": 0.08,
+    "run_ms": 0.86,
+    "run_ms_min": 0.85,
+    "get_outputs_ms": 0.27
+  },
+  {
+    "name": "op_Transpose",
+    "op": "Transpose",
+    "suite": "ops",
+    "precision": "int8",
+    "cores": "auto",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 131072,
+    "set_inputs_ms": 0.08,
+    "run_ms": 0.22,
+    "run_ms_min": 0.21,
+    "get_outputs_ms": 0.13
+  },
+  {
+    "name": "op_Transpose",
+    "op": "Transpose",
+    "suite": "ops",
+    "precision": "int8",
+    "cores": "core0_1_2",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 131072,
+    "set_inputs_ms": 0.09,
+    "run_ms": 0.21,
+    "run_ms_min": 0.21,
+    "get_outputs_ms": 0.16
+  },
+  {
+    "name": "op_Gather",
+    "op": "Gather",
+    "suite": "ops",
+    "precision": "int8",
+    "cores": "auto",
+    "input_dtypes": [
+      "int64"
+    ],
+    "moved_bytes": 72,
+    "set_inputs_ms": 0.06,
+    "run_ms": 0.04,
+    "run_ms_min": 0.04,
+    "get_outputs_ms": 0.06
+  },
+  {
+    "name": "op_Gather",
+    "op": "Gather",
+    "suite": "ops",
+    "precision": "int8",
+    "cores": "core0_1_2",
+    "input_dtypes": [
+      "int64"
+    ],
+    "moved_bytes": 72,
+    "set_inputs_ms": 0.06,
+    "run_ms": 0.04,
+    "run_ms_min": 0.03,
+    "get_outputs_ms": 0.06
+  },
+  {
+    "name": "op_Sigmoid",
+    "op": "Sigmoid",
+    "suite": "ops",
+    "precision": "int8",
+    "cores": "auto",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 131072,
+    "set_inputs_ms": 0.11,
+    "run_ms": 0.14,
+    "run_ms_min": 0.13,
+    "get_outputs_ms": 0.13
+  },
+  {
+    "name": "op_Sigmoid",
+    "op": "Sigmoid",
+    "suite": "ops",
+    "precision": "int8",
+    "cores": "core0_1_2",
+    "input_dtypes": [
+      "int8"
+    ],
+    "moved_bytes": 131072,
+    "set_inputs_ms": 0.08,
+    "run_ms": 0.14,
+    "run_ms_min": 0.13,
+    "get_outputs_ms": 0.13
+  }
+]

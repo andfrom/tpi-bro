@@ -77,12 +77,17 @@ def convert_one(entry, in_dir: Path, out_dir: Path, precision: str, skip_existin
             if rknn.load_onnx(model=str(onnx_path)) != 0:
                 raise RuntimeError("load_onnx failed")
             if precision == "int8":
-                # random calibration set — synthetic kernels have no real data
-                shapes = list(entry["input_shapes"].values())
-                calib = out_dir / f"{name}.calib.npy"
-                np.save(calib, np.random.randn(*shapes[0]).astype(np.float32))
+                # random calibration — one .npy per input; dataset line lists all
+                # inputs space-separated (rknn format). Synthetic kernels have no
+                # real data, so this measures INT8 *speed* only — numerical
+                # correctness (#314) must be checked on a real workload.
+                paths = []
+                for k, shape in entry["input_shapes"].items():
+                    p = out_dir / f"{name}.calib.{k}.npy"
+                    np.save(p, np.random.randn(*shape).astype(np.float32))
+                    paths.append(str(p))
                 ds = out_dir / f"{name}.dataset.txt"
-                ds.write_text(str(calib) + "\n")
+                ds.write_text(" ".join(paths) + "\n")
                 ret = rknn.build(do_quantization=True, dataset=str(ds))
             else:
                 ret = rknn.build(do_quantization=False)

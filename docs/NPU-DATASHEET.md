@@ -32,6 +32,22 @@ Achieved GFLOP/s = `2·M·K·N / run` (best-of-10). `run` is pure NPU compute.
 **Headline FP16 ceilings:** conv **~1.5 TFLOP/s** (3-core) — the real NPU peak;
 matmul only **~230 GFLOP/s** (3-core) — ~6× lower.
 
+### INT8 vs FP16 (3-core GFLOP/s, measured 2026-06-18)
+
+| Kernel | FP16 | INT8 | INT8/FP16 |
+|---|---|---|---|
+| matmul 1024³ | 175 | 551 | **3.1×** |
+| matmul 2048³ | 228 | 564 | 2.5× |
+| conv 64² | 1139 | 1764 | 1.5× |
+| conv 128² | 1338 | **2287** | 1.7× |
+
+**INT8 peak ≈ 2.3 TFLOP/s** (conv, 3-core) vs 1.5 for FP16. INT8 helps matmul
+most (~2.5–3×, since its FP16 path is so inefficient), conv ~1.5–1.7×. All INT8
+compute + op kernels **executed without the #314 empty-output failure** — but
+these use random calibration, so this validates INT8 **speed only**. Numerical
+correctness (#314) must still be checked on a real workload with real
+calibration data (Whisper is the validation case).
+
 ## Layer 2 — memory bandwidth + ridge point (measured 2026-06-18)
 
 FP16 elementwise add (4D NCHW); GB/s = actual on-device bytes (3·S·2) ÷ run.
@@ -73,6 +89,8 @@ shortfall is path inefficiency, not bandwidth.)
 - **3-core scaling is op-size dependent:** large compute-bound ops get 1.8–2.4×;
   small ops (256³ matmul) get <1× (dispatch overhead dominates). Matches the
   Whisper single-token decode finding (1.07× on 3 cores — too small to scale).
-- **FP16 compute peak ≈ 1.5 TFLOP/s** (conv). Use this for roofline estimates
-  until INT8 (#314) is available — INT8 should roughly double it.
-- _pending L2:_ DRAM bandwidth + ridge point.
+- **FP16 compute peak ≈ 1.5 TFLOP/s; INT8 ≈ 2.3 TFLOP/s** (both conv, 3-core).
+  INT8 gives ~1.5–1.7× on conv and ~2.5–3× on matmul — quantization is the
+  bigger lever for matmul-heavy graphs. Weigh against accuracy + #314 risk.
+- **INT8 executes fine** (no empty-output failures here) but #314 is about
+  *numerical* correctness — validate on a real model before trusting INT8 output.
