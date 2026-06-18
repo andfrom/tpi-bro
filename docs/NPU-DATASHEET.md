@@ -64,6 +64,13 @@ asymptotic as fixed overhead amortizes). Well below LPDDR5 theoretical peak —
 elementwise ops are bandwidth-starved on the NPU datapath, not DRAM-limited.
 3-core roughly doubles bandwidth too.
 
+**INT8 bandwidth (3-core):** 8.2 / 12.0 / 12.6 GB/s for the 1.0 / 8.4 / 16.8 M
+adds — i.e. the **GB/s ceiling (~13) is precision-independent** (it's a datapath
+limit). But INT8 moves half the bytes, so bandwidth-bound ops still get ~**1.8×
+wall-time** (16.8 M add: 7.42 ms FP16 → 4.03 ms INT8). Two distinct precision
+levers: compute-bound ops gain from INT8's higher TOPS; bandwidth-bound ops gain
+from fewer bytes against the same GB/s wall.
+
 **Ridge point (FP16)** = conv peak ÷ bandwidth = 1474 GFLOP/s ÷ 13.2 GB/s ≈
 **110 FLOP/byte**. Any kernel below ~110 FLOP/byte is memory-bound. (matmul 2048³
 has AI ≈ 680 FLOP/byte → compute-bound, yet hits only 228 GFLOP/s — so its
