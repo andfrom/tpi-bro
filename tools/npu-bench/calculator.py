@@ -15,8 +15,11 @@ Per-kernel model (roofline + overhead):
 
 `efficiency` (<=1) derates the compute/memory ceilings for a workload class that
 the clean synthetic kernels don't capture (e.g. M=1 GEMV on a conv-optimised NPU).
-Measured: encoder ≈ 1.0 (compute-bound, large matmuls); single-token decode ≈ 0.25
+Measured: encoder ≈ 0.82 (compute-bound, large matmuls); single-token decode ≈ 0.18
 (GEMV + hundreds of tiny ops). The calculator without a derate is a *lower bound*.
+
+No thermal derate is applied: sustained 100%-duty NPU load does not throttle on
+this hardware (L7), so steady-state = burst.
 
 Runs anywhere (pure Python). No NPU, no rknn.
 """

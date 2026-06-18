@@ -131,6 +131,27 @@ Trivial single-input Sigmoid swept ~4 B → 2 MB (FP16, single core), phase-spli
   removes only the *extra* conversion penalty; this floor remains. Only zero-copy
   resident I/O beats it.
 
+## Layer 7 — sustained load / thermal (measured 2026-06-18)
+
+Sustained NPU load via `thermal_test.py`, logging throughput + npu-thermal temp +
+NPU clock per 2 s window. Two regimes:
+
+| Load | kernel | duration | throughput (burst→steady) | temp | clock |
+|---|---|---|---|---|---|
+| realistic (set+run+get) | conv 128² | 120 s | 80 → 81 GFLOP/s | 43→47 °C | 1000 MHz flat |
+| max duty (run-only) | matmul 2048³ | 150 s | 225 → 225 GFLOP/s | 44→48 °C | 1000 MHz flat |
+
+**No thermal throttling.** Even at ~100% NPU duty for 150 s the clock stays pinned
+at 1.0 GHz (userspace governor), throughput is flat (derate 1.00), and temp rises
+only ~4 °C to 48 °C — far below typical RK3588 trip points (~75–85 °C). The
+max-duty throughput (225 GFLOP/s) reproduces the L1 matmul ceiling, confirming the
+NPU sustains full compute indefinitely.
+
+**Cost-model implication: thermal derate = 1.0** for NPU-bound sustained load —
+steady-state equals burst. (Caveat: this stresses one NPU on one node; full-SoC
+load — CPU+GPU+NPU together — or a hot enclosure shares a thermal envelope and was
+not tested.)
+
 ## Wall-clock calculator — validated against Whisper (`calculator.py`)
 
 Composes the constants above into a serial wall-clock prediction for any kernel

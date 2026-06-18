@@ -224,7 +224,9 @@ Open Whisper-specific cells (cost-table to fill) live in tagx
 5. ~~**L3 fixed overhead**~~ — DONE 2026-06-18: ~0.20 ms/inference fixed floor
    (60 µs NPU dispatch + ~140 µs host); native-FP16 marshalling ~190–300 MB/s
    (layout+copy bound). See datasheet L3.
-6. **L7 thermal derate** — sustained-load throttle curve.
+6. ~~**L7 thermal derate**~~ — DONE 2026-06-18: no throttling — 150 s at 100% NPU
+   duty holds 1.0 GHz, +4 °C to 48 °C, flat throughput. Derate = 1.0 (steady =
+   burst) for NPU-bound load. See datasheet L7.
 7. ~~**Build the calculator**~~ — DONE 2026-06-18: `tools/npu-bench/calculator.py`
    composes the constants into a serial wall-clock prediction; validated against
    Whisper (encoder 0.82 raw / 1.00 derated; decoder roofline is a 5× lower bound,
