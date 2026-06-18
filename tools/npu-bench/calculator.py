@@ -21,6 +21,10 @@ Measured: encoder ≈ 0.82 (compute-bound, large matmuls); single-token decode �
 No thermal derate is applied: sustained 100%-duty NPU load does not throttle on
 this hardware (L7), so steady-state = burst.
 
+INT8 speed ceilings are real (~2.5–3× matmul) but INT8 is numerically BROKEN for
+transformer models on rknn 2.3.2 (#314 — Whisper encoder collapses to 94% zeros).
+Do not use the INT8 profile to budget Whisper-class workloads; use fp16.
+
 Runs anywhere (pure Python). No NPU, no rknn.
 """
 from dataclasses import dataclass, field

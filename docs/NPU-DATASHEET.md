@@ -42,11 +42,17 @@ matmul only **~230 GFLOP/s** (3-core) — ~6× lower.
 | conv 128² | 1338 | **2287** | 1.7× |
 
 **INT8 peak ≈ 2.3 TFLOP/s** (conv, 3-core) vs 1.5 for FP16. INT8 helps matmul
-most (~2.5–3×, since its FP16 path is so inefficient), conv ~1.5–1.7×. All INT8
-compute + op kernels **executed without the #314 empty-output failure** — but
-these use random calibration, so this validates INT8 **speed only**. Numerical
-correctness (#314) must still be checked on a real workload with real
-calibration data (Whisper is the validation case).
+most (~2.5–3×, since its FP16 path is so inefficient), conv ~1.5–1.7×. Synthetic
+kernels execute fine — but that is **speed only**.
+
+**INT8 numerical correctness on a real model: BROKEN (#314 confirmed, 2026-06-18).**
+The Whisper medium encoder converted to INT8 with **real** mel calibration (10
+windows) produces collapsed output: 93.7% near-zero values, norm 236 vs FP16's
+1972, cosine 0.25 to the FP16 features. It runs without a runtime error but the
+result is numerically garbage. So on rknn-toolkit2 2.3.2, INT8 is fast but
+**unusable for transformer models — FP16 remains mandatory.** (Confirms
+airockchip/rknn_model_zoo#314 on our exact stack. Untested whether hybrid
+quantization sparing sensitive layers recovers it.)
 
 ## Layer 2 — memory bandwidth + ridge point (measured 2026-06-18)
 
@@ -184,7 +190,8 @@ DAG, then checks it against the directly-measured Whisper medium numbers:
   small ops (256³ matmul) get <1× (dispatch overhead dominates). Matches the
   Whisper single-token decode finding (1.07× on 3 cores — too small to scale).
 - **FP16 compute peak ≈ 1.5 TFLOP/s; INT8 ≈ 2.3 TFLOP/s** (both conv, 3-core).
-  INT8 gives ~1.5–1.7× on conv and ~2.5–3× on matmul — quantization is the
-  bigger lever for matmul-heavy graphs. Weigh against accuracy + #314 risk.
-- **INT8 executes fine** (no empty-output failures here) but #314 is about
-  *numerical* correctness — validate on a real model before trusting INT8 output.
+  INT8 gives ~1.5–1.7× on conv and ~2.5–3× on matmul on synthetic kernels.
+- **But INT8 is numerically BROKEN for transformer models on rknn 2.3.2 (#314).**
+  The Whisper encoder INT8 output collapses (94% zeros, cosine 0.25 to FP16). The
+  speedup is real but unusable until #314 is fixed upstream — **use FP16.** Don't
+  budget INT8 gains for Whisper-class models.

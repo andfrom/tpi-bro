@@ -116,7 +116,7 @@ forced CPU fallback (which adds a host round-trip + sync)?
 | Boundary | Value | Consequence |
 |---|---|---|
 | FP16 dynamic range | max ±65504 | large masks/logits overflow to ±inf (e.g. `-1e9` mask → `-inf`; harmless for softmax, fatal elsewhere). Use `-65504` or `-3e4`. |
-| INT8 quantization | per-tensor/per-channel error | accuracy loss; **currently broken for some graphs** (empty output — airockchip/rknn_model_zoo#314). FP16 mandatory until fixed. |
+| INT8 quantization | **BROKEN for transformers (#314, confirmed 2026-06-18)** | Whisper encoder INT8 (real calibration) collapses: 94% zeros, cosine 0.25 to FP16. Runs without error but output is garbage. Synthetic matmul/conv INT8 is numerically fine and ~2.5–3× faster — so the break is graph/op-specific, not the INT8 datapath. **FP16 mandatory for Whisper-class models.** |
 | Determinism | TBD | measure run-to-run bit-stability if an agent needs reproducibility |
 
 - **Method:** range-stress kernels; compare NPU output to a CPU/FP64 reference;
