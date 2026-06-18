@@ -513,18 +513,23 @@ measured **CPU side** and the Whisper capability summary:
   smaller models; `small` is the realtime tier (~1× realtime, first usable
   Swedish quality). See `tagx/mem/backlog/live-transcription-optimization.md`.
 
-### NC-03: Remaining characterization gaps (low priority)
-**Status:** TODO
+### NC-03: Remaining characterization gaps
 
-- **INT8 hybrid quantization** — #314 breaks default INT8 for transformers
-  (Whisper encoder → 94% zeros). Test whether hybrid quant (sparing sensitive
-  layers, e.g. LayerNorm/attention, in fp16) recovers usable output, which would
-  unlock the ~2.5–3× matmul speedup. Run conversions on **node2** (32 GB), not
-  the laptop — INT8 quantization is the heavy step that stresses the laptop.
+- **INT8 #314 root cause — DIAGNOSED (2026-06-18).** INT8 breaks in the attention
+  **softmax/SDPA path** (per-layer cosine 0.98→0.79 across blocks; FFN matmuls
+  perfect at 0.999); error compounds over the stack → end-to-end collapse (94%
+  zeros). Not the calibration data. Full writeup + repro + draft upstream comments:
+  **`docs/RKNN-INT8-WHISPER-314.md`**. **Tracked open until airockchip fixes it
+  upstream** (issue #314 is open, no maintainer response). Post the draft comments
+  once this repo is public.
+- **INT8 hybrid quantization (workaround) — validation in progress.** Keep
+  attention/softmax in fp16, quantize the FFN to int8 via
+  `hybrid_quantization_step1/step2` (run on **node2**, 32 GB — step1 alone is a
+  ~30+ min quantization-analysis pass). Append measured results to the doc.
+- **Determinism — DONE (2026-06-18):** NPU inference is bit-identical run-to-run.
 - **L6 manual double-buffering / non-blocking `rknn_run`** — `async_mode` gives
   no overlap; a lower-level frame-managed path might. Only worth it if a
   marshalling-bound workload needs it.
-- **Determinism** — run-to-run bit-stability, if any agent needs reproducibility.
 
 ---
 
