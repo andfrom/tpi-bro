@@ -104,6 +104,23 @@ def gen_elementwise(out: Path, C: int, HW: int):
     }
 
 
+# ── L3: fixed-overhead sweep — trivial single-input op over tiny→small sizes ─
+# Sigmoid (1 FLOP/elem, single input) so run≈dispatch floor and marshalling≈bytes.
+# Fitting time vs bytes gives intercept = fixed dispatch, slope = per-byte cost.
+def gen_tiny(out: Path, C: int, HW: int):
+    S = C * HW * HW
+    name = f"tiny_{C}x{HW}x{HW}"
+    shape = [1, C, HW, HW]
+    x = helper.make_tensor_value_info("X", TensorProto.FLOAT, shape)
+    y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, shape)
+    node = helper.make_node("Sigmoid", ["X"], ["Y"])
+    graph = helper.make_graph([node], name, [x], [y])
+    _save(graph, out / f"{name}.onnx")
+    return {"name": name, "op": "Sigmoid", "suite": "l3",
+            "input_shapes": {"X": shape}, "flops": S,
+            "in_bytes": S * 4, "out_bytes": S * 4, "elems": S}
+
+
 # ── L4: single-op feasibility probes ─────────────────────────────────────────
 def gen_op_probe(out: Path, op: str):
     """Minimal model exercising one op; run_bench reports convert/run success."""
@@ -144,7 +161,7 @@ def gen_op_probe(out: Path, op: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="kernels")
-    ap.add_argument("--suite", choices=["l1", "l2", "ops", "all"], default="all")
+    ap.add_argument("--suite", choices=["l1", "l2", "l3", "ops", "all"], default="all")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -160,6 +177,11 @@ def main():
     if args.suite in ("l2", "all"):
         for C, HW in ((64, 128), (128, 256), (256, 256)):  # 1M, 8.4M, 16.8M elems, 4D
             manifest.append(gen_elementwise(out, C, HW))
+
+    if args.suite in ("l3", "all"):
+        # ~4 B → ~2 MB (fp16) of a trivial single-input op
+        for C, HW in ((1, 1), (1, 16), (1, 64), (1, 128), (8, 128), (32, 128)):
+            manifest.append(gen_tiny(out, C, HW))
 
     if args.suite in ("ops", "all"):
         for op in ("Softmax", "Transpose", "Gather", "Sigmoid"):

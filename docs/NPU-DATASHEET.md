@@ -109,6 +109,28 @@ across *separate* contexts/nodes. Single-context async is not a lever.
 (Note: a lower-level non-blocking `rknn_run` + frame management might overlap,
 but the high-level `inference()` async flag does not.)
 
+## Layer 3 — fixed overhead / latency floor (measured 2026-06-18)
+
+Trivial single-input Sigmoid swept ~4 B → 2 MB (FP16, single core), phase-split:
+
+| Kernel | in+out bytes | set (ms) | run (ms) | get (ms) | total |
+|---|---|---|---|---|---|
+| 1×1×1 | 4 | 0.07 | 0.06 | 0.07 | 0.20 |
+| 1×16² | 1 K | 0.07 | 0.06 | 0.07 | 0.20 |
+| 1×64² | 16 K | 0.11 | 0.11 | 0.11 | 0.33 |
+| 1×128² | 64 K | 0.25 | 0.26 | 0.23 | 0.74 |
+| 8×128² | 512 K | 1.41 | 0.18 | 0.92 | 2.51 |
+| 32×128² | 2 M | 5.46 | 0.65 | 3.43 | 9.54 |
+
+- **Fixed per-inference floor ≈ 0.20 ms** (size→0): ~60 µs NPU `run` dispatch +
+  ~70 µs `set_inputs` + ~70 µs `get_outputs`. No op goes below this.
+- **NPU `run` dispatch floor ≈ 60 µs** — the cost of launching any kernel.
+- **Marshalling rate (native FP16, no dtype conversion):** `set_inputs` ~190 MB/s,
+  `get_outputs` ~300 MB/s. Far below DDR — so the slow host path is the
+  **layout transpose + copy itself**, not dtype conversion. Feeding native dtype
+  removes only the *extra* conversion penalty; this floor remains. Only zero-copy
+  resident I/O beats it.
+
 ## Derived design rules (measured)
 
 - **Prefer conv-shaped compute over matmul** on RK3588 — the matmul→exmatmul path

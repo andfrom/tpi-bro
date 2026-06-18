@@ -221,7 +221,9 @@ Open Whisper-specific cells (cost-table to fill) live in tagx
 3. **L2 ridge point** — DRAM + SRAM + host-path bandwidth; compute the ridge.
 4. ~~**L6 async overlap**~~ — DONE 2026-06-18: `async_mode` gives no overlap (see
    datasheet L6). Serial cost model holds; pipeline across contexts/nodes instead.
-5. **L3 fixed overhead** — the latency floor for tiny kernels.
+5. ~~**L3 fixed overhead**~~ — DONE 2026-06-18: ~0.20 ms/inference fixed floor
+   (60 µs NPU dispatch + ~140 µs host); native-FP16 marshalling ~190–300 MB/s
+   (layout+copy bound). See datasheet L3.
 6. **L7 thermal derate** — sustained-load throttle curve.
 7. **Build the calculator** — spreadsheet/script composing the above; validate
    against the Whisper seed cells.
