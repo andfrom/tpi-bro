@@ -479,6 +479,55 @@ Defer until cross-attn KV is validated on hardware and actual decode time measur
 
 ---
 
+## NPU Characterization
+
+The RK3588 NPU is characterized end-to-end in `docs/NPU-CHARACTERIZATION.md`
+(framework), `docs/NPU-DATASHEET.md` (measured constants), and `tools/npu-bench/`
+(reusable harness + calculator). The items below are deferred follow-ups.
+
+### NC-01: Map the RK1 fan curve (thermal trip points)
+**Status:** TODO
+
+The TuringPi BMC controls the RK1 fan in **discrete speed steps** (≥2 steps
+observed audibly during a CPU stress climb 42→62 °C). The NPU at 100% duty peaked
+at 48 °C and never tripped even the first step (silent); CPU at 100% crossed two
+steps. So the first fan trip is between **48 °C and ~62 °C**, second below 62 °C.
+
+**Task:** slow CPU temperature ramp (step core count / frequency) with die temps
+logged, correlated to the audible speed changes — and pull fan state/RPM from the
+BMC via the `tpi` CLI if it exposes fan telemetry. Produces the actual trip
+temperatures + the fan PWM curve. Operational relevance: CPU-bound batch STT
+(faster-whisper) spins the fans; NPU encode stays silent — matters for noise-sensitive deployments.
+
+### NC-02: Record CPU thermal + Whisper-per-minute into the datasheet
+**Status:** TODO
+
+`docs/NPU-DATASHEET.md` L7 currently has only the NPU thermal data. Add the
+measured **CPU side** and the Whisper capability summary:
+- RK1 CPU, 100% on 8 cores, 70 s: 42 → **62 °C (+20 °C)**, flat ~58 GFLOP/s, no
+  throttle (vs NPU +4 °C). The CPU is the heat/noise source, not the NPU.
+- **Whisper per minute of audio (medium, FP16):** ~195 s ≈ **3–4× slower than
+  real-time**, decode-dominated (~90%); FP16 mandatory (INT8 broken, #314).
+  **Optimised CPU faster-whisper (INT8) does medium at ~2× real-time — beats the
+  NPU SA-KV decoder.** NPU's real Whisper value = the encoder (~2× CPU) or
+  smaller models; `small` is the realtime tier (~1× realtime, first usable
+  Swedish quality). See `tagx/mem/backlog/live-transcription-optimization.md`.
+
+### NC-03: Remaining characterization gaps (low priority)
+**Status:** TODO
+
+- **INT8 hybrid quantization** — #314 breaks default INT8 for transformers
+  (Whisper encoder → 94% zeros). Test whether hybrid quant (sparing sensitive
+  layers, e.g. LayerNorm/attention, in fp16) recovers usable output, which would
+  unlock the ~2.5–3× matmul speedup. Run conversions on **node2** (32 GB), not
+  the laptop — INT8 quantization is the heavy step that stresses the laptop.
+- **L6 manual double-buffering / non-blocking `rknn_run`** — `async_mode` gives
+  no overlap; a lower-level frame-managed path might. Only worth it if a
+  marshalling-bound workload needs it.
+- **Determinism** — run-to-run bit-stability, if any agent needs reproducibility.
+
+---
+
 ## Research
 
 ### R-01: RK3588 NPU acceleration for LLM inference
