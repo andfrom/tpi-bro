@@ -118,20 +118,20 @@ L, D, H, HD, FFN, FRAMES, VOCAB, CTX = 24, 1024, 16, 64, 4096, 1500, 51865, 449
 FP16 = 2
 
 
-def whisper_encoder(cores=1, eff=1.0):
+def whisper_encoder(cores=1, eff=1.0, precision="fp16"):
     # per layer: SA proj (4·2·F·D²) + attn (4·H·HD·F²) + FFN (4·F·D·FFN)
     f_sa = 4 * 2 * FRAMES * D * D
     f_attn = 4 * H * HD * FRAMES * FRAMES
     f_ffn = 4 * FRAMES * D * FFN
     per_layer = f_sa + f_attn + f_ffn
     return Workload(
-        "encoder (medium)", "fp16", cores, eff, resident_io=True,
+        "encoder (medium)", precision, cores, eff, resident_io=True,
         kernels=[Kernel("layers", flops=per_layer * L, op_class="matmul",
                         count=L * 10)],
     )
 
 
-def whisper_decoder_step(cores=1, eff=1.0, native_dtype=True):
+def whisper_decoder_step(cores=1, eff=1.0, native_dtype=True, precision="fp16"):
     # M=1 (one token). FLOPs per layer:
     f_sa = 8 * D * D                       # q,k,v,out
     f_xa = 4 * D * D                       # q,out (k,v precomputed)
@@ -140,14 +140,15 @@ def whisper_decoder_step(cores=1, eff=1.0, native_dtype=True):
     f_attn_xa = 4 * H * HD * FRAMES
     per_layer = f_sa + f_xa + f_ffn + f_attn_sa + f_attn_xa
     f_logits = 2 * D * VOCAB
+    wb = BYTES[precision]   # decode is memory-bound on weights → precision halves bytes
     # weights streamed per step (GEMV reads the whole weight matrix for 1 token)
-    w_per_layer = (6 * D * D + 2 * D * FFN) * FP16   # SA(4)+XA(2) proj + FFN
-    w_logits = D * VOCAB * FP16
-    # cross-attn K/V (resident) + SA cache touched
+    w_per_layer = (6 * D * D + 2 * D * FFN) * wb     # SA(4)+XA(2) proj + FFN
+    w_logits = D * VOCAB * wb
+    # cross-attn K/V + SA cache stay FP16 (cache precision)
     xa_kv = 2 * L * FRAMES * D * FP16
     sa_cache = 2 * L * H * CTX * HD * FP16
     return Workload(
-        "decoder step (medium)", "fp16", cores, eff, resident_io=True,
+        "decoder step (medium)", precision, cores, eff, resident_io=True,
         native_dtype=native_dtype,
         kernels=[
             Kernel("layers", flops=per_layer * L, weight_bytes=w_per_layer * L,
@@ -177,6 +178,25 @@ def main():
     print("\nWith measured per-class efficiency derate:")
     _row("encoder (eff=0.82)", whisper_encoder(1, 0.82).predict(), 10373)
     _row("decoder step (eff=0.18)", whisper_decoder_step(1, 0.18).predict(), 897)
+
+    print("\n=== INT8 projection — IF #314 were fixed (PROJECTED, not measured) ===")
+    # compute/memory scaling from measured INT8 ceilings; decode efficiency derate
+    # (0.18) assumed unchanged from FP16 — the one unverified assumption.
+    enc_fp16 = whisper_encoder(1, 0.82).predict()["total_ms"]
+    enc_int8 = whisper_encoder(1, 0.82, "int8").predict()["total_ms"]
+    dec_fp16 = whisper_decoder_step(1, 0.18).predict()["total_ms"]
+    dec_int8 = whisper_decoder_step(1, 0.18, precision="int8").predict()["total_ms"]
+    print(f"  encoder/window:  FP16 {enc_fp16/1000:.1f} s  ->  full-INT8 {enc_int8/1000:.1f} s  ({enc_fp16/enc_int8:.1f}x)")
+    print(f"  decoder/step:    FP16 {dec_fp16:.0f} ms  ->  full-INT8 {dec_int8:.0f} ms  ({dec_fp16/dec_int8:.1f}x)")
+    # per minute of audio: 2 windows, ~200 decode tokens
+    pm_fp16 = 2 * enc_fp16 + 200 * dec_fp16
+    pm_int8 = 2 * enc_int8 + 200 * dec_int8
+    print(f"  per min audio:   FP16 {pm_fp16/1000:.0f} s ({pm_fp16/60000:.1f}x realtime)"
+          f"  ->  full-INT8 {pm_int8/1000:.0f} s ({pm_int8/60000:.1f}x realtime)")
+    print("  caveats: full INT8 is numerically BROKEN for Whisper (#314) — speed")
+    print("    upper-bound only. REALISTIC path is HYBRID (attn FP16 + FFN INT8):")
+    print("    less encoder gain (attention stays FP16), most of the decode gain")
+    print("    (FFN weights are the bulk). Decode 0.18 efficiency assumed unchanged.")
 
     print("\n=== NPU vs CPU (same workload) ===")
     # encoder is compute-bound and the calculator is validated there

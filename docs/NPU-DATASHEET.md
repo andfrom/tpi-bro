@@ -194,4 +194,11 @@ DAG, then checks it against the directly-measured Whisper medium numbers:
 - **But INT8 is numerically BROKEN for transformer models on rknn 2.3.2 (#314).**
   The Whisper encoder INT8 output collapses (94% zeros, cosine 0.25 to FP16). The
   speedup is real but unusable until #314 is fixed upstream — **use FP16.** Don't
-  budget INT8 gains for Whisper-class models.
+  budget INT8 gains for Whisper-class models. Root cause + workaround:
+  `RKNN-INT8-WHISPER-314.md`.
+- **INT8 projection (if #314 fixed; `calculator.py`):** encoder 10.3 s → ~3.0 s
+  (3.4×, compute-bound), decoder step 881 → ~560 ms (1.6×, memory-bound, only
+  weights halve — KV cache stays FP16). Per minute of audio: ~197 s → ~118 s, i.e.
+  still **~2× slower than real-time** for medium — INT8 does **not** make medium
+  real-time, and CPU faster-whisper (~2× *faster* than real-time) would still win.
+  The strategic conclusion (small model for real-time) is unchanged by INT8.
