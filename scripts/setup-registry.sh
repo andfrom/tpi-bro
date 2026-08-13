@@ -51,6 +51,14 @@ done
 # ---- helpers ----------------------------------------------------------------
 
 kv_get() { grep -E "^${1}=" "$2" 2>/dev/null | head -1 | cut -d= -f2- || true; }
+kv_set() {
+  local key="$1" val="$2" file="$3"
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${val}|" "$file"
+  else
+    echo "${key}=${val}" >> "$file"
+  fi
+}
 ip_add()  { local p="${1%.*}" l="${1##*.}"; echo "${p}.$((l + $2))"; }
 say()     { echo "==> $*"; }
 info()    { echo "    $*"; }
@@ -241,9 +249,16 @@ stage_enable_auth() {
 
   local reg_user reg_pass
   reg_user=$(kv_get REGISTRY_USER     "$CREDS_FILE")
-  reg_pass=$(kv_get REGISTRY_PASSWORD "$CREDS_FILE")
   [[ -n "$reg_user" ]] || err "REGISTRY_USER not set in ${CREDS_FILE}"
-  [[ -n "$reg_pass" ]] || err "REGISTRY_PASSWORD not set in ${CREDS_FILE}"
+
+  reg_pass=$(kv_get REGISTRY_PASSWORD "$CREDS_FILE")
+  if [[ -z "$reg_pass" ]]; then
+    info "REGISTRY_PASSWORD not set in ${CREDS_FILE} — generating one…"
+    reg_pass=$(openssl rand -base64 24)
+    kv_set REGISTRY_PASSWORD "$reg_pass" "$CREDS_FILE"
+    info "Generated and saved to ${CREDS_FILE}. Registry push password: ${reg_pass}"
+    info "(Note it down now — this is the only time it's printed.)"
+  fi
 
   info "Creating htpasswd secret for user '${reg_user}'…"
   local tmp

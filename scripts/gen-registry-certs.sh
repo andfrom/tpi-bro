@@ -110,8 +110,7 @@ echo
 echo "2) Create TLS secret in cluster (namespace 'registry'):"
 echo "   kubectl -n registry create secret tls registry-tls --cert=registry.crt --key=registry.key"
 echo
-echo "3) Create htpasswd secret (if using basic auth):"
-echo "   htpasswd -Bbn push 'S3cret!' > htpasswd"
-echo "   kubectl -n registry create secret generic registry-htpasswd --from-file=htpasswd=./htpasswd"
+echo "3) Enable basic auth (generates and saves a password if you don't already have one):"
+echo "   ./setup-registry.sh --enable-auth"
 echo
 echo "4) Install CA on each node + containerd config (see install-ca.sh helper)."

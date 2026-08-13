@@ -27,8 +27,9 @@ tls:
 auth:
   enabled: false   # TLS-first; enable after confirming TLS works (see ADR-0004)
   secretName: registry-htpasswd
-  # Create from an htpasswd file (bcrypt). Example:
-  # htpasswd -Bbn push S3cret! > htpasswd
+  # Don't create this secret by hand — run `./scripts/setup-registry.sh --enable-auth`,
+  # which generates a password (if REGISTRY_PASSWORD isn't already set in
+  # ~/.turingpi/credentials.kv) and creates this secret from it.
 
 registry:
   extraEnv: []   # e.g., ["REGISTRY_STORAGE_DELETE_ENABLED=true"]
