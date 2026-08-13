@@ -14,7 +14,7 @@ accelerator, extended with the overhead, operator-support, concurrency, and
 thermal terms that actually bite on this stack.
 
 > Companion docs: `NPU-MODELS.md` (how to run LLM/Whisper models),
-> `mem/adr/ADR-0023` (NPU device access). This doc is the *why-it-is-fast-or-slow*
+> `adr/ADR-0023` (NPU device access). This doc is the *why-it-is-fast-or-slow*
 > layer underneath both.
 
 ---

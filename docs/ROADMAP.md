@@ -144,7 +144,7 @@ via the `rknn-toolkit2` / `rknn-toolkit-lite2` pipeline.
 
 **Key docs:**
 - `docs/NPU-MODELS.md` — benchmarks (CPU baseline + RKNN results), model sizes, device access
-- `mem/adr/ADR-0023-rknn-npu-device-access-pattern.md` — DRM GEM mode, librknnrt.so, detection
+- `adr/ADR-0023-rknn-npu-device-access-pattern.md` — DRM GEM mode, librknnrt.so, detection
 - `tagx/mem/adr/ADR-0002-rknn-container-conventions.md` — 9 build/runtime conventions
 
 ---
@@ -157,4 +157,4 @@ via the `rknn-toolkit2` / `rknn-toolkit-lite2` pipeline.
 4. **D-00: PriorityClass + ResourceRequests** — add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
 5. **MetalLB (B-05 / C-01)** — stable registry VIP; removes the HostPort-forced node1 pin.
 
-See `docs/OPERATIONS.md` for hardware inventory, access methods, and current cluster state, and `mem/backlog/BACKLOG.md` for the ordered backlog.
+See `docs/OPERATIONS.md` for hardware inventory, access methods, and current cluster state, and `backlog/BACKLOG.md` for the ordered backlog.

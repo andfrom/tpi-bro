@@ -44,7 +44,7 @@ Among the things that were on the "wanted features" list were
 * establish a **docker registry** for storing application images, and
 * **orchestrate** all **applications** through Kubernetes (i.e., k3s actually) to be able to scale up / down applications depending on the user's current focus / need.
 
-Check out the [open backlog](mem/backlog/BACKLOG.md) for open work items and future additions to the project. Maybe you want to help out in realizing these?
+Check out the [open backlog](docs/backlog/BACKLOG.md) for open work items and future additions to the project. Maybe you want to help out in realizing these?
 
 ### Project Name
 
@@ -97,7 +97,7 @@ what's in the repo and the stage-by-stage mechanics for anyone extending it.
 | `tests/run-hardware.sh` | Hardware test runner — Suite 3, full Phase A cluster cycles |
 | `tests/check-cluster.sh` | Suite 4: 10-check cluster health test (Phase B); `--quick` skips pod-pull checks |
 | `docs/` | PREREQUISITES, TROUBLESHOOTING, and status documents |
-| `mem/adr/` | Architecture Decision Records |
+| `docs/adr/` | Architecture Decision Records |
 
 Make the scripts executable:
 
@@ -274,9 +274,9 @@ Supporting services (API gateway, vector DB, queue, metrics) are stateless or di
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for phase-by-phase status and [docs/OPERATIONS.md](docs/OPERATIONS.md) for hardware/software inventory.
 
-Open work items are tracked in [mem/backlog/BACKLOG.md](mem/backlog/BACKLOG.md).
+Open work items are tracked in [docs/backlog/BACKLOG.md](docs/backlog/BACKLOG.md).
 
-Architectural decisions are recorded in [mem/adr/](mem/adr/).
+Architectural decisions are recorded in [docs/adr/](docs/adr/).
 
 ## License
 

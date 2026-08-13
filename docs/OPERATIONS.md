@@ -166,7 +166,7 @@ Re-run `./scripts/setup-registry.sh --ca-only` after changing the password to pu
 | rk1-node3 | TEAM TM8FPD002T 2TB | `/mnt/ssd` (ext4, noatime, UUID fstab) | `local-ssd` provisioner |
 | rk1-node4 | — (no NVMe) | — | excluded from `local-ssd` |
 
-All three NVMe nodes are labeled `storage.tpi-bro/nvme=true`. Workloads express storage requirements as a capability (`storageClassName: local-ssd`) rather than a hostname pin — k3s schedules dynamically to any SSD-capable node via `WaitForFirstConsumer` binding. See `mem/adr/ADR-0019-storage-architecture.md`.
+All three NVMe nodes are labeled `storage.tpi-bro/nvme=true`. Workloads express storage requirements as a capability (`storageClassName: local-ssd`) rather than a hostname pin — k3s schedules dynamically to any SSD-capable node via `WaitForFirstConsumer` binding. See `adr/ADR-0019-storage-architecture.md`.
 
 Registry PVC `registry-data` is on `local-ssd` (node1, co-located with HostPort 5000). The HostPort-forced node1 pin is temporary; will be removed when MetalLB is in place (C-01).
 
