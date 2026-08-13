@@ -4,8 +4,8 @@
 # The operator watches for annotated Services and exposes each as its own
 # Tailscale device with a stable MagicDNS name:
 #
-#   kubectl annotate svc agent-a -n sibling-app tailscale.com/expose=true
-#   → accessible at http://agent-a.<tailnet>.ts.net:18090 from any Tailnet device
+#   kubectl annotate svc YOUR_SERVICE -n YOUR_NAMESPACE tailscale.com/expose=true
+#   → accessible at http://YOUR_SERVICE.<tailnet>.ts.net:PORT from any Tailnet device
 #
 # No ingress controller, no port-forward, no kubectl needed.
 # New agents self-advertise on the Tailnet just by being annotated.
@@ -22,7 +22,7 @@
 # Usage:
 #   ./setup-tailscale-operator.sh
 #   ./setup-tailscale-operator.sh --dry-run
-#   ./setup-tailscale-operator.sh --expose svc/agent-a -n sibling-app
+#   ./setup-tailscale-operator.sh --expose svc/YOUR_SERVICE -n YOUR_NAMESPACE
 #   ./setup-tailscale-operator.sh --verify
 
 set -euo pipefail
@@ -93,7 +93,7 @@ if (( DRY )); then
   info "              --set-string oauth.clientId=<id> --set-string oauth.clientSecret=<secret>"
   info ""
   info "After deploying, expose services with:"
-  info "  ./setup-tailscale-operator.sh --expose svc/agent-a -n sibling-app"
+  info "  ./setup-tailscale-operator.sh --expose svc/YOUR_SERVICE -n YOUR_NAMESPACE"
   exit 0
 fi
 
@@ -113,8 +113,8 @@ helm upgrade --install "$HELM_RELEASE" tailscale/tailscale-operator \
 say "Done."
 info ""
 info "Expose services on the Tailnet:"
-info "  ./scripts/setup-tailscale-operator.sh --expose svc/agent-a -n sibling-app"
-info "  → accessible at http://sibling-app-agent-a.<tailnet>.ts.net:18090"
+info "  ./scripts/setup-tailscale-operator.sh --expose svc/YOUR_SERVICE -n YOUR_NAMESPACE"
+info "  → accessible at http://YOUR_NAMESPACE-YOUR_SERVICE.<tailnet>.ts.net:PORT"
 info "  (operator names devices as <namespace>-<service>)"
 info ""
 info "Or annotate directly:"

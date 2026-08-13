@@ -175,16 +175,17 @@ prior setup, generate a fresh one rather than reusing an old `TAILSCALE_AUTH_KEY
 
 ## Step 6 — Populate the registry with your own images
 
-**This is not automated by anything in this repo.** `deploy-agent-a.sh` and
-similar scripts only apply Kubernetes manifests — they assume the image they
-reference already exists in the registry. If you're bringing up this cluster to
-run applications from sibling repos (e.g. `sibling-app`, `tagx`), you need to separately
-clone those, build their images, and push them:
+**This is not automated by anything in this repo, by design** — see
+[DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md). tpi-bro provides the cluster
+and registry; each application owns its own Dockerfile, build tooling, and
+Kubernetes manifests. If you're bringing up this cluster to run applications
+from sibling repos (e.g. `sibling-app`, `tagx`), you need to separately clone those,
+build their images, and push them using whatever build flow that repo defines:
 
 ```bash
 # example — adjust for whatever app repo you're deploying
 cd ../sibling-app
-make build push   # or whatever that repo's build flow is
+make build-push   # or whatever that repo's build flow is
 ```
 
 Only after the image exists at `rk1-node1:5000/<your-image>:<tag>` will a

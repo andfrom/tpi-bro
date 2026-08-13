@@ -6,7 +6,7 @@
 #   2. Trusts the cluster registry CA cert in Docker's cert store for that IP
 #   3. Optionally restarts Docker to apply the new cert trust
 #   4. Verifies registry reachability over Tailscale
-#   5. Prints the TAILSCALE_REGISTRY_IP value to add to sibling-app's .env
+#   5. Prints the TAILSCALE_REGISTRY_IP value to add to your application's .env
 #
 # Run once per laptop when working off-network (e.g., coffee shop, travel).
 # Re-run after cert regeneration or if the Tailscale IP changes.
@@ -149,10 +149,10 @@ fi
 
 say "Done."
 echo
-echo "Add the following to your sibling-app/.env to enable off-network builds:"
+echo "Add the following to your application's .env to enable off-network builds:"
 echo ""
 echo "  TAILSCALE_REGISTRY_IP=${NODE1_TS_IP}"
 echo ""
 echo "Then re-source .env (or open a new shell) and run:"
 echo "  export TAILSCALE_REGISTRY_IP=${NODE1_TS_IP}"
-echo "  cd <sibling-app>  &&  make build-push"
+echo "  cd <your-app>  &&  make build-push   # or whatever your build target is"

@@ -191,7 +191,7 @@ Exposes individual services on the Tailnet by name. Requires an OAuth client:
 4. Deploy:
    ```bash
    ./scripts/setup-tailscale-operator.sh
-   ./scripts/setup-tailscale-operator.sh --expose svc/agent-a -n sibling-app
+   ./scripts/setup-tailscale-operator.sh --expose svc/YOUR_SERVICE -n YOUR_NAMESPACE
    ```
 
 ---
@@ -338,8 +338,8 @@ workload namespace:
 | `background`  | 100  | Ollama inference pods |
 
 Higher value = higher scheduling priority and last-to-evict under pressure.
-With these in place, if the cluster runs out of memory, Ollama (background)
-is evicted before Agent A (interactive).
+With these in place, if the cluster runs out of memory, background workloads
+(e.g. Ollama) are evicted before interactive ones (e.g. an agent).
 
 ### Step 2 — Verify the policy was applied
 
@@ -348,26 +348,29 @@ is evicted before Agent A (interactive).
 ```
 
 You should see `interactive` and `background` listed under PriorityClasses,
-and a `LimitRange` entry in each of the `sibling-app` and `ollama` namespaces.
+and a `LimitRange` entry in the `ollama` namespace. `apply-resource-policy.sh`
+only owns tpi-bro's own platform services — applications manage their own
+namespace's LimitRange (see [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md)).
 
 ### Step 3 — Restart existing pods to pick up priorityClassName
 
-If Ollama or Agent A were already running before you applied the policy,
-their pods need to be restarted to get the `priorityClassName` field:
+If Ollama or an application Deployment were already running before you
+applied the policy, their pods need to be restarted to get the
+`priorityClassName` field:
 
 ```bash
 kubectl rollout restart deployment -n ollama
-kubectl rollout restart deployment -n sibling-app
+kubectl rollout restart deployment -n YOUR_NAMESPACE
 ```
 
 Check the new pods have the right priority:
 ```bash
-kubectl get pod -n sibling-app -o wide
-kubectl describe pod -n sibling-app -l app=agent-a | grep Priority
-# Should show: Priority: 1000 / PriorityClassName: interactive
-
 kubectl describe pod -n ollama -l app=ollama-node1 | grep Priority
 # Should show: Priority: 100 / PriorityClassName: background
+
+kubectl get pod -n YOUR_NAMESPACE -o wide
+kubectl describe pod -n YOUR_NAMESPACE -l app=YOUR_APP | grep Priority
+# Should show: Priority: 1000 / PriorityClassName: interactive
 ```
 
 ---

@@ -91,37 +91,6 @@ Currently untested. Document gaps once hardware is available.
 
 ## Platform Hygiene
 
-### PH-01: Remove application-specific knowledge from D-02
-
-**Status:** TODO
-
-The agent-deployment path violates the principle that tpi-bro should
-not know about specific applications. It names `sibling-app`, `agent-a`, and
-`OLLAMA_URL` directly, and `scripts/deploy-agent-a.sh` lives in this repo.
-
-**Correct ownership:**
-- `scripts/deploy-agent-a.sh` → move to the application repo under its own
-  `infra/` or `scripts/` directory. tpi-bro should not own application deploy
-  scripts.
-- `sibling-app/infra/k8s/agent-a.yaml` is already in the right place (application
-  repo); tpi-bro should not reference it.
-- tpi-bro's role is to provide the platform primitives the application uses:
-  the cluster, the registry, Ollama as a service, PriorityClasses, StorageClasses,
-  Tailscale operator. How an application deploys onto those primitives is the
-  application's concern.
-
-**What tpi-bro should provide instead:** a documented pattern for deploying a
-stateless agent that consumes an Ollama endpoint — generic enough that any
-application can follow it without tpi-bro knowing which application it is.
-This pattern can live in `docs/` as a deployment guide, not as a named script.
-
-**Steps:**
-1. Move `scripts/deploy-agent-a.sh` to the application repo
-2. Document the generic pattern instead of the specific application
-3. Add a `docs/DEPLOYING-AN-AGENT.md` guide covering: build ARM64 image via
-   buildx, push to cluster registry, apply a Deployment + ClusterIP Service,
-   expose via Tailscale operator annotation — no application names
-
 ---
 
 ## Event-Driven Scheduling (ADR-0022)

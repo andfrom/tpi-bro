@@ -52,7 +52,6 @@ jobs:
             scripts/setup-registry.sh \
             scripts/mount-ssd.sh \
             scripts/install-ollama.sh \
-            scripts/deploy-agent-a.sh \
             scripts/install-tailscale.sh \
             scripts/setup-subnet-router.sh \
             scripts/setup-tailscale-operator.sh \

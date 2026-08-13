@@ -38,13 +38,13 @@ if (( DO_VERIFY )); then
   kubectl get priorityclass interactive background 2>/dev/null \
     || info "PriorityClasses not yet applied."
   echo
-  say "LimitRange — sibling-app:"
-  kubectl get limitrange -n sibling-app 2>/dev/null \
-    || info "Namespace 'sibling-app' not found."
-  echo
   say "LimitRange — ollama:"
   kubectl get limitrange -n ollama 2>/dev/null \
     || info "Namespace 'ollama' not found."
+  info ""
+  info "Applications manage their own namespace's LimitRange — this script"
+  info "only owns cluster-scoped PriorityClasses and tpi-bro's own platform"
+  info "services (Ollama)."
   exit 0
 fi
 
@@ -53,16 +53,12 @@ fi
 if (( DRY )); then
   say "Dry-run — would apply:"
   info "kubectl apply -f ${MANIFESTS_DIR}/priority-classes.yaml"
-  info "kubectl apply -f ${MANIFESTS_DIR}/limitrange-sibling-app.yaml"
   info "kubectl apply -f ${MANIFESTS_DIR}/limitrange-ollama.yaml"
   exit 0
 fi
 
 say "Applying PriorityClasses (cluster-scoped)…"
 kubectl apply -f "${MANIFESTS_DIR}/priority-classes.yaml"
-
-say "Applying LimitRange — sibling-app namespace…"
-kubectl apply -f "${MANIFESTS_DIR}/limitrange-sibling-app.yaml"
 
 say "Applying LimitRange — ollama namespace…"
 kubectl apply -f "${MANIFESTS_DIR}/limitrange-ollama.yaml"
@@ -71,6 +67,9 @@ say "Done."
 info ""
 info "Verify: ./scripts/apply-resource-policy.sh --verify"
 info ""
-info "Restart Ollama and agent pods to pick up the new priorityClassName:"
+info "Restart Ollama to pick up the new priorityClassName:"
 info "  kubectl rollout restart deployment -n ollama"
-info "  kubectl rollout restart deployment -n sibling-app"
+info ""
+info "Applications own their own namespace's LimitRange and are responsible"
+info "for restarting their own Deployments to pick up priorityClassName —"
+info "see docs/DEPLOYING-AN-AGENT.md."
