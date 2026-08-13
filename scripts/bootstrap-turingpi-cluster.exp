@@ -44,6 +44,7 @@ set BMC_USER "root"             ;# SSH user on BMC (for --flash bmc)
 set BMC_PASS ""                 ;# SSH password on BMC; leave blank for key/passwordless auth
 set BMC_IMAGE_DIR "/mnt/sdcard/tpi-images"  ;# directory on BMC to store downloaded images
 set BMC_SDCARD_DEV ""                        ;# SD card partition on BMC; blank = auto-detect largest ext2/3/4 mmcblk partition
+set DNS_SERVERS ""                           ;# space-separated; used to fix BMC /etc/resolv.conf if missing (--flash bmc mode)
 
 # ---------- Stage Registry ----------
 set STAGES {
@@ -194,7 +195,7 @@ proc apply_config {cfg} {
                IMAGE_DEFAULT_TYPE MANIFEST_FILE IMAGE_CACHE_DIR
                BMC_FIRMWARE_MODE BMC_MANIFEST_FILE
                SERVER_NODE_IDX BMC_HOST
-               BMC_USER BMC_PASS BMC_IMAGE_DIR BMC_SDCARD_DEV} {
+               BMC_USER BMC_PASS BMC_IMAGE_DIR BMC_SDCARD_DEV DNS_SERVERS} {
     if {[dict exists $cfg $key]} { set ::$key [dict get $cfg $key] }
   }
   dict for {k v} $cfg {
@@ -652,11 +653,20 @@ proc stage_A0_bmc_firmware {dry stateRef} {
     return
   }
 
-  # Resolve BMC_HOST from state if not already set
+  # Resolve BMC_HOST from state if not already set. On a genuinely fresh run
+  # (no config BMC_HOST, no prior state) A0 runs before A1 in the default
+  # stage sequence, so there's nothing to resolve yet — do the discovery
+  # inline here instead of dying. A1 running later just hits its own
+  # "already known" short-circuit, so this is safe to call twice.
   if {$::BMC_HOST eq ""} {
     set stored [state_get $state "bmc_ip" ""]
-    if {$stored ne ""} { set ::BMC_HOST $stored; say "  BMC host from state: $::BMC_HOST" } \
-    else { die "BMC_HOST not set and not in state. Run A1 first or set BMC_HOST in config." }
+    if {$stored ne ""} {
+      set ::BMC_HOST $stored; say "  BMC host from state: $::BMC_HOST"
+    } else {
+      say "  BMC host not yet known — running discovery early (A1 hasn't run yet)…"
+      stage_A1_find_bmc $dry state
+      if {$::BMC_HOST eq ""} { die "BMC discovery failed — could not resolve a BMC host for firmware check" }
+    }
   }
 
   say "  Querying BMC firmware version…"
@@ -730,8 +740,13 @@ proc stage_A1_find_bmc {dry stateRef} {
   if {$dry} { say "DRY: would run nmap on $::SUBNET"; return }
   set bmc [find_bmc $::SUBNET]
   if {$bmc eq ""} {
+    say "Could not auto-detect BMC via nmap hostname match (this network's mDNS/reverse-DNS"
+    say "doesn't resolve 'turingpi' for nmap the way find_bmc expects — see ADR-0009)."
     say "Could not auto-detect BMC. Enter IP:"
     expect_user -re "(.*)\n"
+    if {![info exists expect_out(1,string)]} {
+      die "No BMC IP provided (no interactive input available, e.g. running non-interactively, or stdin closed). Set BMC_HOST in config instead of relying on auto-detect."
+    }
     set bmc $expect_out(1,string)
   }
   state_put state "bmc_ip" $bmc
@@ -864,6 +879,7 @@ proc stage_A3_flash_optional {dry stateRef} {
         } else {
           say "DRY: SSH $::BMC_USER@$bmc_disp: check $sdcard_mount; if not mounted, auto-detect largest ext2/3/4 mmcblk partition and mount"
         }
+        say "DRY: SSH $::BMC_USER@$bmc_disp: check DNS resolution; if broken, write /etc/resolv.conf from DNS_SERVERS"
         say "DRY: SSH $::BMC_USER@$bmc_disp: mkdir -p $::BMC_IMAGE_DIR"
         for {set i 1} {$i <= $::NODE_COUNT} {incr i} {
           set type [image_type_for $i]
@@ -889,6 +905,31 @@ proc stage_A3_flash_optional {dry stateRef} {
       lassign [bmc_cmd "echo ok"] _rc _out
       if {$_rc != 0 || ![string match "*ok*" $_out]} {
         die "Cannot connect to BMC at $::BMC_HOST as $::BMC_USER via SSH.\nIf the BMC requires a password, set BMC_PASS in bootstrap-config.kv.\nIf using key-based auth, ensure your SSH key is authorized on the BMC."
+      }
+
+      # This mode downloads directly on the BMC (see comment above), which needs the
+      # BMC's own DNS resolution working — that's not guaranteed by anything else in
+      # this script (the BMC's br0 interface is static, not DHCP, so nothing populates
+      # /etc/resolv.conf automatically; a fresh/reset BMC can easily have none at all,
+      # which fails silently until curl actually needs to resolve a hostname). Check
+      # and fix it here rather than let the download die deep in ensure-cached logic.
+      say "  Checking BMC DNS resolution…"
+      lassign [bmc_cmd "getent hosts github.com >/dev/null 2>&1 && echo ok || echo fail"] _rc dns_out
+      if {![string match "*ok*" $dns_out]} {
+        if {$::DNS_SERVERS eq ""} {
+          die "BMC has no working DNS resolution and DNS_SERVERS is not set in bootstrap-config.kv — cannot fix automatically. Set DNS_SERVERS (e.g. \"192.168.1.1 8.8.8.8\") or configure /etc/resolv.conf on the BMC manually."
+        }
+        say "  BMC DNS resolution is broken — writing /etc/resolv.conf from DNS_SERVERS ($::DNS_SERVERS)…"
+        set resolv_lines {}
+        foreach ns $::DNS_SERVERS { lappend resolv_lines "nameserver $ns" }
+        set resolv_content [join $resolv_lines "\n"]
+        lassign [bmc_cmd "printf '%s\\n' \"$resolv_content\" > /etc/resolv.conf && echo ok || echo fail"] _rc2 fix_out
+        if {![string match "*ok*" $fix_out]} { die "Failed to write /etc/resolv.conf on the BMC" }
+        lassign [bmc_cmd "getent hosts github.com >/dev/null 2>&1 && echo ok || echo fail"] _rc3 verify_out
+        if {![string match "*ok*" $verify_out]} {
+          die "BMC still cannot resolve DNS after writing /etc/resolv.conf — check network/gateway (DNS_SERVERS=$::DNS_SERVERS may be unreachable from the BMC's subnet)."
+        }
+        say "  BMC DNS resolution fixed."
       }
 
       # Ensure SD card is mounted at the parent of BMC_IMAGE_DIR
