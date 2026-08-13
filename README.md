@@ -1,75 +1,28 @@
 # `tpi-bro` &nbsp; – &nbsp; a Turing Pi 2 Cluster Bootstrap project
 
-> This is a practical, minimal bootstrap to get a [Turing Pi 2](https://turingpi.com/) cluster with 4 [RK1](https://docs.turingpi.com/docs/turing-rk1-specs-and-io-ports) compute modules to a working state fast. This guide has 3 main sections,
+> This is a practical, minimal bootstrap to get a [Turing Pi 2](https://turingpi.com/) cluster with 4 [RK1](https://docs.turingpi.com/docs/turing-rk1-specs-and-io-ports) compute modules to a working state fast.
 >
-> * [Initial HW configuration/assembly](#initial-hw-configuration--assembly) &nbsp; – &nbsp; (some of?) what you need to know beyond official documentation.
-> * [Initial bootstrap](#initial-board-and-cluster-bootstrap-expect-flashing-and-network-setup) is done through leveraging the interactive capabilities of Expect (a TCL-based language), to flash compute modules, to identify IP addresses on local network and to set usernames, passwords and hostnames for cluster nodes. (This is called "Phase A".)
+> * **[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)** &nbsp; – &nbsp; the full installation walkthrough: hardware assembly, prerequisites, flashing, and network setup. Start there.
+> * [Initial bootstrap](#initial-board-and-cluster-bootstrap-expect-flashing-and-network-setup) below covers the same ground (Phase A) at a reference level, for extending the scripts rather than following along step-by-step.
 > * [A GitOps workflow](#handoff-from-bootstrap-expect-to-cluster-orchestration-k8sgitops) handles the rest, K8s orchestration, etc.<br>(These are Phases B through D, all the way up to a "Hello, World!" example for a multi-agent setup.)
 >
 > **Disclaimer**: This project has yet to play with Nvidia Jetson (Orin) Nano and CM4 adapters for RPi, so it's not possible to tell if these scripts and instructions will help anyone to get started for such configurations.
 
-## Quick start
+## Getting started
 
-Assumes the board is assembled and powered on, nodes have Ubuntu flashed, and `tpi` is installed and authenticated on your laptop.
+**→ [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) is the full installation walkthrough** — hardware assembly, prerequisites, Phase A (flash/name/network), Phase B (k3s/registry/storage), Tailscale, and populating the registry with application images. Start there.
+
+Quick taste, if you already know what you're doing and just need the commands:
 
 ```bash
-# 1. Clone and make scripts executable
 git clone https://github.com/your-org/tpi-bro && cd tpi-bro
 chmod +x scripts/*.sh scripts/*.exp
+cp bootstrap-config.kv.example bootstrap-config.kv && $EDITOR bootstrap-config.kv
 
-# 2. Create your local config (edit SUBNET to match your LAN)
-cp bootstrap-config.kv.example bootstrap-config.kv
-$EDITOR bootstrap-config.kv
-
-# 3. Dry-run to verify everything looks right (no changes made)
-./scripts/bootstrap-turingpi-cluster.exp --dry-run --phase A
-
-# 4. Run Phase A — discover BMC, name nodes, set password, start registry
-./scripts/bootstrap-turingpi-cluster.exp --phase A
-
-# 5. Verify
-ssh ubuntu@rk1-node1 hostname
-curl http://rk1-node1:5000/v2/_catalog   # Phase A only — HTTP, ephemeral
+./scripts/bootstrap-turingpi-cluster.exp --dry-run --phase A   # preview
+./scripts/bootstrap-turingpi-cluster.exp --phase A             # Phase A: flash, name, network (~1h)
+./scripts/bootstrap-phase-b.sh                                 # Phase B: k3s, registry, storage
 ```
-
-After step 4 you have: 4 named nodes (`rk1-node{1..4}`), SSH access by hostname, and a temporary HTTP Docker registry on `rk1-node1:5000`. **Phase B** replaces this with a persistent, TLS-authenticated registry and installs k3s across all nodes — see [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for current progress and next steps.
-
-**Need to reflash nodes first?** See [Flashing compute modules](#flashing-compute-modules).  
-**BMC firmware out of date?** See [BMC firmware (A0)](#bmc-firmware-a0).  
-**Starting over?** `./scripts/teardown-cluster.exp && ./scripts/bootstrap-turingpi-cluster.exp --phase A`
-
-### Phase B Quick Start (k3s + persistent registry)
-
-Run once after Phase A completes. The orchestrator handles B0 through B2 in order:
-
-```bash
-# Dry-run first — prints every action, touches nothing
-./scripts/bootstrap-phase-b.sh --dry-run
-
-# Full run (B0 → B2: static IPs, SSH keys, k3s, registry, auth, verify)
-./scripts/bootstrap-phase-b.sh
-```
-
-**You will be prompted twice during B0:** once for the BMC root password (for
-static IP configuration) and once for the Ubuntu node password set during Phase A
-(for SSH key distribution). Both are interactive by design — this is the bootstrap
-phase where key-based auth doesn't exist yet. After B0, everything is fully
-automated.
-
-```bash
-# Resume from a specific stage if something failed
-./scripts/bootstrap-phase-b.sh --from B2_registry
-
-# Run the full suite and finish with a 10-check cluster health test
-./scripts/bootstrap-phase-b.sh --check
-
-# Individual scripts are still usable directly (e.g. to re-run one stage)
-./scripts/setup-registry.sh --verify
-```
-
-Credentials for the registry are stored in `~/.turingpi/credentials.kv` (mode 600,
-gitignored). See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for full Phase B
-status and `docs/PREREQUISITES.md` for tool requirements.
 
 Phase B (k3s + persistent registry + NVMe + Ollama) and Phase D (Agent A + Agent B + monitoring) are complete. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for current state.
 
@@ -99,26 +52,6 @@ Check out the [open backlog](mem/backlog/BACKLOG.md) for open work items and fut
 
 ---
 
-## Initial HW configuration / assembly
-
-Most of the HW build (heatsinks), etc, are described well on the TuringPi home page. However, there are two things that you need to know. This information will be kept here until the official homepage has been updated and the tolerances for the metal busings of the heatsink have been fixed.
-
-### Heatsink mounting
-
-Be very careful when screwing the heatsinks onto the RK1 compute modules. The busings that I received were different, and in particular one heatsink had a too short busing on one side, bending the PCB if screwing it all the way in, potentially leading to problems later down the road. Be sure to return any heatsink or request a new one if you get one with too short busings like this one.
-
-![Bending of PSB due to too short busing](assets/images/pcb-bending-too-short-busing.png)
-
-### F Panel
-
-If you are using the TuringPi ATX case, the [Power] and [Power LED] connectors should be connected like this:
-
-![Split image with F Panel pin layout and photo on connected Power and Power LED connectors](assets/images/f-panel-pin-layout.png)
-
-Later, if you need to reflash the RK1 compute modules (say that you've been away for some time and didn't write down your passwords... yeah, it can happen...), you can connect the power connector to the reset pins, and press the button for 10s to do a factory reset. Then you can move the connector back to the [Power] connector again and start anew.
-
----
-
 ## Initial board and cluster bootstrap: Expect (flashing and network setup)
 
 This repo contains a resumable, staged [**Expect**](https://core.tcl-lang.org/expect/index) bootstrap for a [Turing Pi](https://turingpi.com/) ([BMC](https://docs.turingpi.com/docs/turing-pi2-bmc-intro-specs)) + 4× [RK1](https://docs.turingpi.com/docs/turing-rk1-specs-and-io-ports) nodes to reach a wanted board bring up "baseline". The "baselines" are categorized into "Phases" with varying degrees of Docker/Kubernetes capabilities up to a working "Hello, World" multi-agent setup example. E.g., "Phase A" contains
@@ -129,33 +62,13 @@ This repo contains a resumable, staged [**Expect**](https://core.tcl-lang.org/ex
 The Expect script is designed to be:
 - **Resumable**: run a slice with `--from` / `--to`
 - **Dry-run capable**: see what would happen with `--dry-run`
-- **Mode-aware**: choose flashing mode `--flash skip|local|image|download` (see [Flashing compute modules](#flashing-compute-modules))
+- **Mode-aware**: choose flashing mode `--flash skip|local|image|download|bmc` (see [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md#flashing-modes-step-3-in-detail))
 - **Stateful**: discoveries are saved to `bootstrap-state.kv`
 - **Rediscoverable**: `--rediscover` re-scans the subnet after DHCP reassignment, with no power cycling
 
----
-
-### Prerequisites
-
-See [docs/PREREQUISITES.md](docs/PREREQUISITES.md) for the full list of required tools, install commands, and distribution support notes.
-
-**Short version — Ubuntu/Debian one-liner:**
-```bash
-sudo apt update && sudo apt install -y \
-  expect openssh-client sshpass nmap curl \
-  openssl apache2-utils
-```
-Then install `tpi`, `kubectl`, `helm`, and `docker` per [docs/PREREQUISITES.md](docs/PREREQUISITES.md).
-
-#### On the RK1 nodes
-
-- Ubuntu-based OS flashed and booting (Phase A3 handles this, or do it manually via the BMC web UI)
-- DHCP enabled (standard Ubuntu image default)
-- Default credentials: `ubuntu` / `ubuntu`
-
-#### `sudo` access on your laptop
-
-Stages A1 and A6 update `/etc/hosts` on your laptop (A1 pins the BMC, A6 pins the nodes). The helper script (`bootstrap-host-helper.sh`) uses `sudo` for both. You will be prompted if your sudo session has expired.
+For hardware assembly, prerequisites, and step-by-step usage, see
+[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md). The reference below covers
+what's in the repo and the stage-by-stage mechanics for anyone extending it.
 
 ---
 
@@ -192,76 +105,10 @@ Make the scripts executable:
 chmod +x scripts/*.sh scripts/*.exp
 ```
 
----
-
-### Usage
-
-#### Show help
-
-```bash
-./scripts/bootstrap-turingpi-cluster.exp --help
-```
-
-#### Run everything in Phase A (real run)
-
-```bash
-./scripts/bootstrap-turingpi-cluster.exp --phase A
-```
-
-#### Dry-run all of Phase A (prints actions, but no changes)
-
-```bash
-./scripts/bootstrap-turingpi-cluster.exp --dry-run --phase A
-```
-
-#### Run a slice by stage name (in example, up to node discovery)
-
-```bash
-./scripts/bootstrap-turingpi-cluster.exp --from A1_find_bmc --to A4_power_on_and_discover
-```
-
-#### Resume from naming/password/reboot step (after fixing an issue)
-
-```bash
-./scripts/bootstrap-turingpi-cluster.exp --from A5_name_password_reboot
-```
-
-#### Use a config file
-
-Copy the example and edit it to match your cluster:
-
-```bash
-cp bootstrap-config.kv.example bootstrap-config.kv
-# edit bootstrap-config.kv — it auto-loads on next run
-```
-
-Or pass an explicit config file (multiple `--config` flags allowed):
-
-```bash
-./scripts/bootstrap-turingpi-cluster.exp --config /path/to/my-config.kv --dry-run --phase A
-```
-
-CLI flags always override config file values.
-
-#### Choose flashing mode (see also: [Flashing compute modules](#flashing-compute-modules))
-
-```bash
-./scripts/bootstrap-turingpi-cluster.exp --phase A --flash skip      # default — no flashing
-./scripts/bootstrap-turingpi-cluster.exp --phase A --flash local     # tpi flash --local per node
-./scripts/bootstrap-turingpi-cluster.exp --phase A --flash image \   # flash per-node image file
-    --image worker.img --image-1 server.img
-./scripts/bootstrap-turingpi-cluster.exp --phase A --flash download \ # download + SHA256 verify
-    --manifest images-manifest.kv
-```
-
-#### Fix IP drift without re-running Phase A
-
-If DHCP has reassigned node IPs since the last run (e.g. after WiFi dropped), use `--rediscover`. It scans the subnet, identifies each node by its SSH hostname, and rewrites `/etc/hosts` and `bootstrap-state.kv` with the new IPs. No power cycling, no password changes.
-
-```bash
-./scripts/bootstrap-turingpi-cluster.exp --rediscover
-./scripts/bootstrap-turingpi-cluster.exp --dry-run --rediscover   # preview only
-```
+Full usage, flashing modes, BMC firmware handling, troubleshooting, and
+configuration variables are all covered in
+[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md). Show all CLI flags with
+`./scripts/bootstrap-turingpi-cluster.exp --help`.
 
 ---
 
@@ -269,10 +116,10 @@ If DHCP has reassigned node IPs since the last run (e.g. after WiFi dropped), us
 
 | Stage | Name | What it does |
 |-------|------|--------------|
-| A0 | `bmc_firmware` | Optional BMC firmware check or upgrade (default: skip); see [BMC firmware](#bmc-firmware-a0) |
+| A0 | `bmc_firmware` | Optional BMC firmware check or upgrade (default: skip); see [BMC firmware](docs/GETTING-STARTED.md#bmc-firmware-a0) |
 | A1 | `find_bmc` | Discover BMC via `nmap` or manual entry; pin `turingpi.local` in `/etc/hosts`; extract BMC MAC |
 | A2 | `poweroff_all` | Power OFF all RK1 nodes via `tpi power off` |
-| A3 | `flash_optional` | Optional flash — `skip` / `local` / `image` / `download`; see [Flashing compute modules](#flashing-compute-modules) |
+| A3 | `flash_optional` | Optional flash — `skip` / `local` / `image` / `download`; see [flashing modes](docs/GETTING-STARTED.md#flashing-modes-step-3-in-detail) |
 | A4 | `power_on_and_discover` | Power nodes on one-by-one; discover IPs via delta scan; extract MACs; print DHCP reservation summary |
 | A5 | `name_password_reboot` | Change password, set hostnames (`rk1-node{1..4}`), reboot |
 | A6 | `write_hosts_on_laptop` | Append node IP↔hostname entries to laptop `/etc/hosts` |
@@ -280,174 +127,21 @@ If DHCP has reassigned node IPs since the last run (e.g. after WiFi dropped), us
 
 Each stage is written with check→act logic where practical, so reruns are safe.
 
----
-
-### DHCP and IP stability
-
-DHCP does not guarantee stable IPs. After a power cycle or network interruption, nodes may get different addresses, breaking SSH and `kubectl` access.
-
-**The right fix: static DHCP reservations.** When A4 completes it prints a table like:
-
-```
-DHCP reservation summary — configure in your router for stable IPs:
-  rk1-node1  MAC=xx:xx:xx:xx:xx:xx  →  <your-ip>
-  rk1-node2  MAC=xx:xx:xx:xx:xx:xx  →  <your-ip>
-  rk1-node3  MAC=xx:xx:xx:xx:xx:xx  →  <your-ip>
-  rk1-node4  MAC=xx:xx:xx:xx:xx:xx  →  <your-ip>
-  turingpi (BMC)  MAC=xx:xx:xx:xx:xx:xx  →  <your-ip>
-```
-
-Enter these MAC→IP bindings in your router's DHCP reservation settings. Once done, IPs are stable across reboots and `--rediscover` is rarely needed.
-
-**If you can't set DHCP reservations** (e.g. a managed office network), run `--rediscover` any time IPs drift. It identifies nodes by hostname over SSH — not by stored IP — so it works regardless of what DHCP assigned.
-
----
-
-### Configuration
-
-Copy `bootstrap-config.kv.example` to `bootstrap-config.kv` and edit it. The file
-is auto-loaded on every run; CLI flags always win over file values. Do not commit
-`bootstrap-config.kv` — it is gitignored.
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `SUBNET` | `192.168.1.0/24` | Your LAN subnet (used by nmap in A1/A4) |
-| `NODE_COUNT` | `4` | Number of RK1 nodes |
-| `NODE_PREFIX` | `rk1-node` | Hostname prefix |
-| `DEFAULT_USER` | `ubuntu` | Initial SSH username on fresh nodes |
-| `DEFAULT_PASS` | `ubuntu` | Initial SSH password on fresh nodes |
-| `NEW_PASS` | _(empty)_ | Cluster password — prompted at runtime if empty |
-| `REGISTRY_NODE_IDX` | `1` | Which node index hosts the Docker registry |
-| `REGISTRY_PORT` | `5000` | Registry port |
-| `SERVER_NODE_IDX` | `1` | Which node becomes the k3s server (Phase B) |
-| `FLASH_MODE` | `skip` | `skip` / `local` / `image` / `download` |
-| `IMAGE_DEFAULT` | _(empty)_ | Default image path for `--flash image` |
-| `IMAGE_1` … `IMAGE_4` | _(empty)_ | Per-node image path overrides |
-| `IMAGE_DEFAULT_TYPE` | `default` | Default manifest key for `--flash download` |
-| `IMAGE_1_TYPE` … `IMAGE_4_TYPE` | _(empty)_ | Per-node manifest key overrides |
-| `MANIFEST_FILE` | `./images-manifest.kv` | Image manifest for download mode |
-| `IMAGE_CACHE_DIR` | `./image-cache` | Cache directory for downloaded images |
-| `BMC_FIRMWARE_MODE` | `skip` | `skip` / `check` / `upgrade` — controls A0 |
-| `BMC_MANIFEST_FILE` | `./bmc-manifest.kv` | BMC firmware manifest for A0 |
-| `BMC_HOST` | _(auto)_ | Set by A1; passed to `tpi` as `--host` |
-
----
-
-### Troubleshooting
-
-**BMC not found / `turingpi.local` not resolving:**
-
-mDNS (`turingpi.local`) is unreliable on some WiFi networks. Once Phase A has run once, this is no longer an issue — A1 pins the BMC IP in `/etc/hosts` so `tpi` always resolves it. Before Phase A has run, find the BMC manually:
-
-```bash
-nmap -sn 192.168.1.0/24     # look for host named "turingpi"
-tpi --host <ip> power status # use the discovered IP explicitly
-```
-
-A1 will then run `tpi` with that IP and pin it. Subsequent stages and reruns use `/etc/hosts` — no mDNS dependency.
-
-**Node IPs changed after power cycle:**
-
-Set static DHCP reservations using the MAC table printed by A4 (see [DHCP and IP stability](#dhcp-and-ip-stability) above). If IPs have already drifted, run:
-
-```bash
-./scripts/bootstrap-turingpi-cluster.exp --rediscover
-```
-
-This scans the subnet, identifies nodes by SSH hostname, and updates both `/etc/hosts` and the state file. No power cycling.
-
-**tpi authentication fails / "no such device" error:**
-
-`tpi` needs an interactive terminal to prompt for BMC credentials on first use. Run it once from your normal terminal:
-
-```bash
-tpi power status    # or: tpi --host <bmc-ip> power status
-```
-
-Credentials are cached in `~/.cache/tpi_token` and all subsequent calls (including from the bootstrap script) work without a TTY.
-
-**Registry not reachable after push:**
-
-The Phase A registry is HTTP-only. Add `rk1-node1:5000` to Docker's `insecure-registries` on your laptop:
-```json
-{ "insecure-registries": ["rk1-node1:5000"] }
-```
-Then `sudo systemctl restart docker`.
-
-**Reruns:** Safe to rerun with `--from <stage>` after fixing whatever failed.
-
----
-
-### Flashing compute modules
-
-Stage A3 supports four modes, controlled by `--flash MODE` or `FLASH_MODE=` in the config:
-
-| Mode | What happens |
-|------|-------------|
-| `skip` _(default)_ | Assumes nodes already have a working OS; proceeds to A4 |
-| `local` | Calls `tpi flash -n N --local` per node (BMC reads from its own storage) |
-| `image` | Calls `tpi flash -n N --image-path FILE` per node; use `--image FILE` for all nodes or `--image-1 FILE` … `--image-4 FILE` for per-node overrides |
-| `download` | Downloads image from `images-manifest.kv`, verifies SHA256, caches in `./image-cache/`; re-downloads if the cached file's checksum no longer matches |
-
-**Example manifest** (`images-manifest.kv.example`):
-
-```
-default.description=Ubuntu 22.04 for RK1
-default.url=https://example.com/ubuntu-22.04-arm64+rk1.img.xz
-default.sha256=<sha256 of the file at that URL>
-```
-
-Copy to `images-manifest.kv`, fill in real values, then:
-
-```bash
-./scripts/bootstrap-turingpi-cluster.exp --phase A --flash download --manifest images-manifest.kv
-```
-
----
-
-### BMC firmware (A0)
-
-Stage A0 runs before A1 and handles BMC firmware. It is skipped by default.
-
-```bash
-# Check whether the running BMC version matches the manifest
-./scripts/bootstrap-turingpi-cluster.exp --from A0_bmc_firmware --to A0_bmc_firmware \
-    --bmc-firmware check --bmc-manifest bmc-manifest.kv
-
-# Upgrade if outdated
-./scripts/bootstrap-turingpi-cluster.exp --from A0_bmc_firmware --to A0_bmc_firmware \
-    --bmc-firmware upgrade --bmc-manifest bmc-manifest.kv
-
-# Dry-run (never touches the BMC)
-./scripts/bootstrap-turingpi-cluster.exp --dry-run --from A0_bmc_firmware --to A0_bmc_firmware \
-    --bmc-firmware upgrade
-```
-
-Populate `bmc-manifest.kv` from `bmc-manifest.kv.example` with the firmware URL and SHA256 from the [TuringPi BMC-Firmware releases](https://github.com/turing-machines/BMC-Firmware/releases).
-
----
+DHCP/IP stability, full configuration variable reference, troubleshooting, flashing
+modes, and BMC firmware handling are all covered in
+[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md).
 
 ### Testing
 
 ```bash
 ./tests/run-ci.sh            # Suite 1 (dry-run) + Suite 2 (mock), no hardware
-./tests/run-ci.sh --suite 1  # dry-run only
-./tests/run-ci.sh --suite 2  # mock only
-
-./tests/run-hardware.sh --cycles 2          # two bootstrap→teardown cycles on real hardware
-./tests/run-hardware.sh --flash-cycle       # also run a download-flash cycle
-./tests/run-hardware.sh --bmc-check         # include A0 BMC version check
-
-# Phase B cluster health check (requires a running cluster)
-./tests/check-cluster.sh                    # 10 checks: nodes, registry, TLS, auth, push, pod pull
-./tests/check-cluster.sh --quick            # skip pod-pull checks (faster)
+./tests/run-hardware.sh --cycles 2          # bootstrap→teardown cycles on real hardware
+./tests/check-cluster.sh                    # Phase B 10-check cluster health test
 ```
 
-The CI suite (Suites 1+2 + shellcheck/helm lint, no hardware) runs automatically in
-GitHub Actions on every push and PR. Suite 3 (hardware) and Suite 4 (cluster health)
-run manually.
-
----
+The CI suite (dry-run + mock, no hardware) runs automatically on every push/PR.
+See [docs/TEST_STATUS.md](docs/TEST_STATUS.md) for the full coverage map —
+including what's genuinely live-tested vs. dry-run/mock-only.
 
 ---
 
@@ -472,24 +166,10 @@ The bootstrap is intentionally forward-only (idempotent stages, check→act). Te
 | T7 | `poweroff_nodes` | Graceful `sudo poweroff` per node; waits for SSH to drop; BMC `tpi power off` |
 | T8 | `clear_state` | Archive `bootstrap-state.kv` with a timestamp |
 
-### Teardown usage
-
-```bash
-./scripts/teardown-cluster.exp                    # full teardown (prompts for current node password)
-./scripts/teardown-cluster.exp --dry-run          # preview all actions
-./scripts/teardown-cluster.exp --remove-docker    # also uninstall Docker from registry node
-./scripts/teardown-cluster.exp --keep-hostname    # skip hostname reset (bootstrap overwrites anyway)
-./scripts/teardown-cluster.exp --from T3_stop_registry  # resume from a specific stage
-```
-
 T1 is resilient to IP drift — it tries stored IPs first, then falls back to scanning the subnet and identifying nodes by their SSH hostname. You do not need a valid state file to run teardown.
 
-### Full reinstall cycle
-
-```bash
-./scripts/teardown-cluster.exp                    # reset to factory-equivalent state
-./scripts/bootstrap-turingpi-cluster.exp --phase A  # fresh Phase A from scratch
-```
+Usage, flags, and the full reinstall cycle are covered in
+[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md#starting-over).
 
 ---
 
