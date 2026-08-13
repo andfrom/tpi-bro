@@ -24,7 +24,7 @@ cp bootstrap-config.kv.example bootstrap-config.kv && $EDITOR bootstrap-config.k
 ./scripts/bootstrap-phase-b.sh                                 # Phase B: k3s, registry, storage
 ```
 
-Phase B (k3s + persistent registry + NVMe + Ollama) and Phase D (Agent A + Agent B + monitoring) are complete. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for current state.
+Phase B (k3s + persistent registry + NVMe + Ollama) and Phase D (Agent A + Agent B + monitoring) are complete. See [docs/ROADMAP.md](docs/ROADMAP.md) for current state.
 
 ---
 
@@ -196,7 +196,7 @@ Once the registry is reachable and each node has a hostname and working SSH, the
 
 Everything after bootstrap is handled declaratively via Kubernetes manifests and GitOps tooling:
 
-**Phase B:** Persistent registry with TLS + basic auth, k3s, NVMe storage, Tailscale mesh, monitoring. **Complete** as of 2026-05-11. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
+**Phase B:** Persistent registry with TLS + basic auth, k3s, NVMe storage, Tailscale mesh, monitoring. **Complete** as of 2026-05-11. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 **Phase C:** Local registry mirror + sync from laptop, IP resilience (static DHCP or CoreDNS), cloud expansion notes. Not started.
 
@@ -272,7 +272,7 @@ Supporting services (API gateway, vector DB, queue, metrics) are stateless or di
 
 ## Project Status
 
-See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for phase-by-phase status and [docs/DEPLOYMENT_STATUS.md](docs/DEPLOYMENT_STATUS.md) for hardware/software inventory.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for phase-by-phase status and [docs/OPERATIONS.md](docs/OPERATIONS.md) for hardware/software inventory.
 
 Open work items are tracked in [mem/backlog/BACKLOG.md](mem/backlog/BACKLOG.md).
 

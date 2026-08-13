@@ -1,4 +1,7 @@
-# tpi-bro — Deployment Status
+# tpi-bro — Operations
+
+The single source of truth for current hardware, access methods, and credentials
+format. For phase-by-phase progress and what's next, see [ROADMAP.md](ROADMAP.md).
 
 _Last updated: 2026-06-16 (RKNN NPU inference validated; NPU section added)_
 
@@ -134,7 +137,7 @@ Registry basic auth credentials are stored in `~/.turingpi/credentials.kv` (mode
 ```
 # ~/.turingpi/credentials.kv  (key=value, chmod 600)
 REGISTRY_USER=push
-REGISTRY_PASSWORD=<generated on first --enable-auth run>
+REGISTRY_PASSWORD=<leave unset to auto-generate on first --enable-auth run, or set your own>
 
 # N-01: Tailscale (Layer 1)
 TAILSCALE_AUTH_KEY=<reusable pre-authorized key from https://login.tailscale.com/admin/settings/keys>
@@ -171,3 +174,5 @@ Registry PVC `registry-data` is on `local-ssd` (node1, co-located with HostPort 
 
 - `turingpi.local` mDNS resolution can fail when only WiFi is available on some networks; fall back to using the static IP `192.168.1.10` directly
 - Ubuntu 24.04.1 LTS enforces a mandatory password change on first boot; the bootstrap script handles this automatically via `unlock_expired_password`
+- BMC's `nmap`-based auto-detection (A1) depends on reverse-DNS resolving the literal hostname "turingpi," which most networks don't provide — expect the manual IP-entry fallback to be the normal path, not a corner case
+- Accumulated cluster cruft as of 2026-08-13, not yet cleaned up: ~26 dead pods in the `registry` namespace from an old crash-looping ReplicaSet; Grafana crash-looping on a PVC permission mismatch (`init-chown-data` gets `Permission denied`); `sibling-app/ingest` CronJob stuck in `ImagePullBackOff` for an image that was never pushed; an orphaned 9GB `tagx/whisper-stt:rknn` image sitting in node1's legacy Docker store, never pushed to the registry

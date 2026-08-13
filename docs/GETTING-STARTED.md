@@ -302,8 +302,8 @@ run it.
 ## Reference
 
 - [PREREQUISITES.md](PREREQUISITES.md) — full tool list and install commands
-- [PROJECT_STATUS.md](PROJECT_STATUS.md) — phase-by-phase status
-- [DEPLOYMENT_STATUS.md](DEPLOYMENT_STATUS.md) — current hardware/software inventory
+- [ROADMAP.md](ROADMAP.md) — phase-by-phase status and what's next
+- [OPERATIONS.md](OPERATIONS.md) — current hardware, access methods, credentials format
 - [TEST_STATUS.md](TEST_STATUS.md) — what's actually tested vs. dry-run-only
 - [../mem/backlog/BACKLOG.md](../mem/backlog/BACKLOG.md) — open work items
 - [../mem/adr/](../mem/adr/) — architecture decisions, including why things are built the way they are

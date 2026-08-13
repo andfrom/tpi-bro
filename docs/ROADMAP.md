@@ -1,4 +1,4 @@
-# tpi-bro — Project Status
+# tpi-bro — Roadmap
 
 _Last updated: 2026-06-16 (RKNN NPU inference validated on node1; NPU-MODELS.md + ADR-0023 added)_
 
@@ -149,25 +149,6 @@ via the `rknn-toolkit2` / `rknn-toolkit-lite2` pipeline.
 
 ---
 
-## Hardware State (as of 2026-05-11)
-
-Phase B complete (B0–B9). All 4 nodes running k3s v1.35.4+k3s1 with containerd 2.2.3. Persistent HTTPS registry on SSD. `local-ssd` StorageClass available cluster-wide.
-
-| Node | Hostname | Static IP | Status |
-|------|----------|-----------|--------|
-| 1 | rk1-node1 | 192.168.1.11 | k3s server; HTTPS registry (auth enabled); 2TB NVMe mounted `/mnt/ssd`; labeled `storage.tpi-bro/nvme=true` |
-| 2 | rk1-node2 | 192.168.1.12 | k3s agent; 2TB NVMe mounted `/mnt/ssd`; labeled `storage.tpi-bro/nvme=true` |
-| 3 | rk1-node3 | 192.168.1.13 | k3s agent; 2TB NVMe mounted `/mnt/ssd`; labeled `storage.tpi-bro/nvme=true` |
-| 4 | rk1-node4 | 192.168.1.14 | k3s agent; eMMC only (no NVMe); excluded from `local-ssd` provisioner |
-
-Static IPs configured via netplan (nodes) + ifupdown (BMC). Persist across reboots. DHCP drift no longer a concern.
-
-**BMC:** `turingpi.local` / `192.168.1.10` — accessible over WiFi.
-
-IPs, MACs, and other operational details are in `bootstrap-state.kv` (gitignored) and `~/.turingpi/`.
-
----
-
 ## Immediate Next Steps
 
 1. **W-03: KV-cache decoder** — split Whisper decoder into cross-attention KV encoder (once) + per-token autoregressive decoder; expected ~100× speedup for NPU decoding.
@@ -176,4 +157,4 @@ IPs, MACs, and other operational details are in `bootstrap-state.kv` (gitignored
 4. **D-00: PriorityClass + ResourceRequests** — add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
 5. **MetalLB (B-05 / C-01)** — stable registry VIP; removes the HostPort-forced node1 pin.
 
-See `docs/DEPLOYMENT_STATUS.md` for the full current cluster state and `mem/backlog/BACKLOG.md` for the ordered backlog.
+See `docs/OPERATIONS.md` for hardware inventory, access methods, and current cluster state, and `mem/backlog/BACKLOG.md` for the ordered backlog.

@@ -2,111 +2,9 @@
 
 Ordered roughly by dependency / priority. Items with `[BLOCKED]` cannot start until their blocker is resolved.
 
----
-
-## Phase A — Bootstrap Polish
-
-### A-01: Replace `tpi_power` placeholder with real `tpi` CLI calls
-**Status:** DONE  
-`tpi_power` uses `exec {*}$args` with proper list construction; passes `--host $BMC_HOST` when set. A2 calls `tpi power off` (all nodes). A4 calls `tpi power on -n $i` per node. Discovery uses event-driven deadline loops — no fixed sleeps.
-
-### A-02: Write teardown script
-**Status:** DONE (`teardown-cluster.exp`)  
-Stages T1–T8: load state → verify SSH → stop registry → reset passwords → reset hostnames → clean /etc/hosts → graceful poweroff + tpi → archive state. Flags: `--dry-run`, `--remove-docker`, `--keep-hostname`, `--from`/`--to`, `--password`.
-
-### A-03: Dry-run for all stages (not just Phase A)
-**Status:** DONE  
-`--dry-run` verified across all bootstrap stages (Phase A), `--rediscover`, and all teardown stages (T1–T8). All produce meaningful output.
-
-### A-04: CI / automated test for Phase A dry-run
-**Status:** DONE  
-GitHub Actions workflow (`.github/workflows/ci.yml`) runs `./tests/run-ci.sh` on every push/PR to main. No hardware required.
-
-### A-08: Lint CI + Phase B cluster health check
-**Status:** DONE (2026-05-11)  
-CI (`lint` job in `.github/workflows/ci.yml`) runs `shellcheck --severity=warning` on all Phase B shell scripts and `helm lint` + `helm template` on `charts/registry/` on every push/PR. No hardware required.  
-`tests/check-cluster.sh` (Suite 4) runs 10 named checks against a live cluster: nodes Ready, registry pod, TLS, auth, push, and per-node pod pull via containerd mirror. `--quick` skips the pod pull tests.
-
-### A-05: Real flash modes (image / download / local)
-**Status:** DONE  
-`--flash image` flashes per-node image files via `tpi flash --image-path`. `--flash download` downloads from a manifest (`images-manifest.kv`), verifies SHA256, caches in `./image-cache/`, and re-downloads on checksum mismatch. `--flash local` uses `tpi flash --local`. All four modes (`skip` / `local` / `image` / `download`) are implemented and tested.
-
-### A-06: Config file support
-**Status:** DONE  
-`--config FILE` loads key=value overrides before stage execution. If `./bootstrap-config.kv` exists it is auto-loaded. CLI flags always win. `bootstrap-config.kv.example` documents all keys. Per-node image paths (`IMAGE_1` … `IMAGE_4`) and types (`IMAGE_1_TYPE` … `IMAGE_4_TYPE`) are settable from the config file.
-
-### A-07: A0 BMC firmware check / upgrade stage
-**Status:** DONE  
-`A0_bmc_firmware` runs before A1. Controlled by `--bmc-firmware skip|check|upgrade` (default: skip). Check mode compares running BMC version against `bmc-manifest.kv`. Upgrade mode downloads firmware, verifies SHA256, calls `tpi firmware --file`, and waits for BMC reboot. Full dry-run support (exits early before touching BMC host).
-
----
-
-## Phase B — Persistent Registry + k3s
-
-### B-00: Static IPs on all nodes and BMC
-**Status:** DONE (2026-05-09)  
-`setup-static-ips.sh` configures netplan on Ubuntu nodes and ifupdown on the BMC. Static IPs persist across reboots. No DHCP drift.
-
-### B-01: k3s install on node1 (server role)
-**Status:** DONE (2026-05-09)  
-`install-k3s.sh` installs k3s v1.35.4+k3s1 on node1 with `--tls-san rk1-node1 --tls-san 192.168.1.11`. Laptop kubeconfig written to `~/.kube/config`.
-
-### B-02: k3s install on nodes 2–4 (worker/agent role)
-**Status:** DONE (2026-05-09)  
-`install-k3s.sh` joins nodes 2–4 as k3s agents. All 4 nodes Ready.
-
-### B-03: containerd registry mirror config
-**Status:** DONE (2026-05-11)  
-`install-ca.sh` writes `/etc/rancher/k3s/registries.yaml` on all 4 nodes and restarts k3s/k3s-agent. Mirror endpoint: `https://rk1-node1:5000`.
-
-### B-04: Deploy persistent registry via Helm chart
-**Status:** DONE (2026-05-11)  
-`setup-registry.sh` deploys `charts/registry/` via Helm in namespace `registry`. HostPort 5000 on node1. PVC 50Gi (local-path). TLS via `registry-tls` Secret. Auth disabled (TLS-first per ADR-0004).
-
-### B-05: Generate and distribute CA cert
-**Status:** DONE (2026-05-11)  
-`gen-registry-certs.sh` generates self-signed CA + server cert. `install-ca.sh` distributes CA to all 4 nodes (system trust store + containerd). Laptop Docker trust automated in `setup-registry.sh`.
-
-### B-06: End-to-end laptop push/pull test
-**Status:** DONE (2026-05-11)  
-`setup-registry.sh --verify` confirms `docker push` + `docker pull` from laptop via HTTPS with CA trust. Registry at `rk1-node1:5000` working.
-
-### B-07: Enable registry basic auth
-**Status:** DONE (2026-05-11)  
-`./scripts/setup-registry.sh --enable-auth` creates htpasswd Secret from `~/.turingpi/credentials.kv` and upgrades the Helm release with `auth.enabled=true`. `--verify` now detects auth and logs in automatically. Deployment strategy fixed to `Recreate` to avoid HostPort conflicts during rolling upgrade.
-
-### B-08: Test k3s pod pull from registry
-**Status:** DONE (2026-05-11)  
-Pod scheduled to rk1-node3 pulled `rk1-node1:5000/test:latest` in 505ms via containerd mirror (`registries.yaml` uses IP endpoint `https://192.168.1.11:5000` so no hostname DNS needed on worker nodes). Auth credentials embedded in mirror config. Phase A HTTP registry container (docker-proxy) conflict resolved — removed from node1.
-
-### B-09: Mount NVMe SSDs on all nodes
-**Status:** DONE (2026-05-11)
-
-Hardware reality (verified 2026-05-11):
-- Nodes 1, 2, 3: TEAM TM8FPD002T 2TB NVMe, unformatted
-- Node 4: **no NVMe** — only eMMC (29.1GB); see ADR-0019 note on DB placement
-
-**Automated via `scripts/mount-ssd.sh` + `setup-registry.sh --migrate-pvc`:**
-
-```bash
-# Dry-run to preview all actions
-./scripts/bootstrap-phase-b.sh --dry-run --from B09_mount_ssd
-
-# Run: format + mount nodes 1-3, deploy local-ssd StorageClass, migrate registry PVC
-./scripts/bootstrap-phase-b.sh --from B09_mount_ssd
-
-# Or run individually
-./scripts/mount-ssd.sh                        # format + mount + StorageClass
-./scripts/setup-registry.sh --migrate-pvc     # move registry PVC to SSD (data loss ok)
-```
-
-After B-09:
-- `/mnt/ssd` mounted on nodes 1-3 (UUID fstab entry, noatime, ext4)
-- `local-ssd` StorageClass backed by `/mnt/ssd/local-path-provisioner/`
-- Registry PVC on `local-ssd` (node1 SSD)
-- Node4 has no SSD — DB pod (future) must use node3 SSD or wait for SSD install
-
-See ADR-0019 for storage architecture decisions.
+Finished items are removed rather than kept as `DONE` markers — the historical
+record lives in git history and commit messages, not here. This is a pure
+TODO list.
 
 ---
 
@@ -128,85 +26,18 @@ Document how to federate the local cluster with a cloud K8s cluster (e.g., for G
 
 ## Phase D — Multi-Agent Workloads
 
-### D-00: Apply PriorityClass and ResourceRequests to all agent Deployments
-**Status:** DONE (2026-05-11)  
-`manifests/priority-classes.yaml`: `interactive` (1000, agent-a) and `background` (100, Ollama). `manifests/limitrange-sibling-app.yaml` + `manifests/limitrange-ollama.yaml`. Ollama chart updated with `priorityClassName: background`; Agent A manifest with `priorityClassName: interactive`. Applied via `scripts/apply-resource-policy.sh`.
-
-### D-01: Ollama deployment on each LLM node
-**Status:** DONE (2026-05-11)  
-`charts/ollama/` — single Helm chart, one release per NVMe node (`ollama-node1/2/3`), namespace `ollama`. Node hostname pin justified by model-weight locality (ADR-0019). PVC 200Gi `local-ssd` per instance. `scripts/install-ollama.sh` auto-detects NVMe nodes via label, deploys all three, optionally pulls models. In-cluster DNS: `ollama-node1.ollama:11434`, etc.
-
-### D-02: Agent deployment (sibling-app Agent A)
-**Status:** DONE (2026-05-11)  
-`scripts/deploy-agent-a.sh` — builds linux/arm64 image on laptop via QEMU + docker buildx (docker-container driver), pushes to cluster registry, applies `sibling-app/infra/k8s/agent-a.yaml`. Namespace `sibling-app`, Deployment + ClusterIP Service on port 18090. `OLLAMA_URL=http://ollama-node1.ollama:11434`. No node pin (stateless). `model.cfg` updated to `llama3.2:3b`.
-
 ### D-03: Ingress / service exposure
-**Status:** TODO — superseded in priority by N-01 (Tailscale mesh). Revisit after N-01; Tailscale operator may cover all ingress needs for this use case.
-
-### D-04: Observability baseline
-**Status:** DONE (2026-05-11)  
-`kube-prometheus-stack` deployed via `scripts/install-monitoring.sh` in namespace `monitoring`. Grafana exposed on Tailnet via operator. Pre-loaded dashboards: node-exporter-full (gnetId 1860), k8s cluster overview (7249), k3s (15282). Stateful components (Prometheus, Grafana, Alertmanager) pinned to NVMe nodes via `storage.tpi-bro/nvme=true` nodeSelector; all PVCs on `local-ssd`. k3s-specific components (kubeControllerManager/Scheduler/Proxy/Etcd) disabled. Grafana accessible at `monitoring-kube-prometheus-stack-grafana.<tailnet>.ts.net:80`.  
-Config: `charts/monitoring/values.yaml`. Verify: `./scripts/install-monitoring.sh --verify`.
-
----
-
-## Network Layer
-
-### N-01: Tailscale mesh — cluster as seamless network extension
-**Status:** DONE (2026-05-11) — all three layers complete.
-
-Tailscale is not just remote access. It is the network substrate that makes every application on the laptop interact with the cluster without port-forwarding, without `kubectl` tunnels, without knowing about home router topology or NAT. The cluster becomes a seamless extension of the laptop for any process.
-
-**Three layers, each independently valuable:**
-
-**Layer 1 — Node mesh (30 min)**  
-Install `tailscale` on all 4 nodes and the laptop. Every device gets a stable Tailscale IP and a MagicDNS hostname (`rk1-node1.your-tailnet.ts.net`) that never changes. Works from home, coffee shop, CI runner, anywhere.
-
-- `OLLAMA_URL=http://rk1-node1.your-tailnet.ts.net:11434` in `.env` — no port-forward ever again
-- `kubectl` over Tailscale IP — no `port-forward`, kubeconfig just works
-- NodePort services directly reachable by name
-
-**Layer 2 — Subnet routing (15 min)**  
-One node advertises the k3s cluster CIDR (`10.43.0.0/16`) as a Tailscale subnet route. Every ClusterIP service becomes directly routable from the laptop — no NodePort needed, in-cluster DNS names become reachable from outside.
-
-**Layer 3 — Tailscale Kubernetes operator (1–2 h)**  
-The operator watches for annotated Services and exposes each as its own Tailscale device with a stable DNS name. Annotate a Service with `tailscale.com/expose: "true"` and it appears at `agent-a.your-tailnet.ts.net` — no ingress controller, no port-forward, no kubectl. Any app on any Tailnet device calls it directly by name.
-
-- Deploying a new agent = one annotation; it appears on the Tailnet automatically
-- This replaces D-03 (ingress controller) for this use case
-- CI pipelines, mobile, scripts, other applications — all call services by stable name
-
-**End state:** `sibling-app score` from anywhere, any app talks to any service by name, new agents self-advertise. The orchestration layer has zero network topology knowledge.
-
-**Implementation order:** Layer 1 → Layer 2 → Layer 3. Each layer is usable standalone.
-
-**Key gotcha:** Auth key must be **Reusable** + **Pre-authorized**. The default in the Tailscale admin is Single-use — a single-use key is silently consumed on the first node and fails for all subsequent ones. See `docs/PREREQUISITES.md` N-01 section for the full manual setup sequence.
-
-**Scripts:**
-- `scripts/install-tailscale.sh` — installs + authenticates tailscaled on all 4 nodes; `--status` to inspect
-- `scripts/setup-subnet-router.sh` — enables IP forwarding on node1, advertises k3s CIDRs; requires manual route approval in Tailscale admin
-- `scripts/setup-tailscale-operator.sh` — deploys Tailscale k8s operator via Helm; `--expose svc/NAME -n NS` to expose a service
+**Status:** TODO — superseded in priority by N-01 (Tailscale mesh, done). Tailscale operator covers ingress needs for this use case; revisit only if a non-Tailnet-member consumer ever needs access.
 
 ---
 
 ## Security & Hardening (Future)
-
-### S-01: Internal HTTPS ingress
-**Status:** SUPERSEDED by N-01. Tailscale operator provides TLS-terminated ingress per service without a separate ingress controller.
 
 ### S-02: Multi-tenancy / user compartmentalization
 SSD volume isolation per user. Not needed until multiple users share the cluster.
 
 ### S-03: Compute prioritization
 PriorityClass for critical agents; ResourceQuota per namespace; eviction policy for background jobs under GPU/NPU pressure.
-
----
-
-## Configuration & UX
-
-### CFG-01: `~/.turingpi/` home directory for personal config
-**Status:** DONE (2026-05-11)  
-Both bootstrap scripts now fall back to `~/.turingpi/bootstrap-config.kv` when no repo-local config exists. `MANIFEST_FILE` and `IMAGE_CACHE_DIR` defaults also prefer `~/.turingpi/` when no repo-local file exists. Priority order: `--config FILE` > `./bootstrap-config.kv` > `~/.turingpi/bootstrap-config.kv`. Repo-local workflow unchanged.
 
 ---
 
@@ -267,7 +98,7 @@ Currently untested. Document gaps once hardware is available.
 
 **Status:** TODO
 
-D-02 (agent deployment, marked DONE) violates the principle that tpi-bro should
+The agent-deployment path violates the principle that tpi-bro should
 not know about specific applications. It names `sibling-app`, `agent-a`, and
 `OLLAMA_URL` directly, and `scripts/deploy-agent-a.sh` lives in this repo.
 
@@ -289,8 +120,7 @@ This pattern can live in `docs/` as a deployment guide, not as a named script.
 
 **Steps:**
 1. Move `scripts/deploy-agent-a.sh` to the application repo
-2. Update D-02 in this backlog to describe the generic pattern, not the specific
-   application
+2. Document the generic pattern instead of the specific application
 3. Add a `docs/DEPLOYING-AN-AGENT.md` guide covering: build ARM64 image via
    buildx, push to cluster registry, apply a Deployment + ClusterIP Service,
    expose via Tailscale operator annotation — no application names
@@ -315,29 +145,6 @@ helm install keda kedacore/keda --namespace keda --create-namespace
 Redis can share the `monitoring` namespace or get its own. PVC on `local-ssd`
 for persistence across pod restarts (job queue must survive Redis restarts).
 
-### E-02: Node capability labels and bootstrap integration
-
-**Status:** DONE (2026-06-16) — `scripts/label-node-capabilities.sh`; C15 added to `tests/check-cluster.sh`
-
-Add capability label detection to the node setup scripts so labels are applied
-automatically at bootstrap time and whenever a module is swapped.
-
-Labels to detect and apply (see ADR-0022 and ADR-0023):
-- `tpi-bro/npu: rk3588` — RK1 module; detected via device tree model string
-  (`cat /proc/device-tree/model | grep -i "RK1"`) since `/dev/rknpu` does NOT
-  exist in DRM GEM mode (kernel 6.1 on this cluster — see ADR-0023)
-- `tpi-bro/npu: jetson-orin-nano` — Jetson module; detected by CUDA device nodes
-- No `tpi-bro/npu` label — CM4 or any node without an NPU device
-
-**Note:** ADR-0022 originally said to detect by `/dev/rknpu`. The RK3588 on
-this cluster uses DRM GEM mode (`CONFIG_ROCKCHIP_RKNPU_DRM_GEM=y`) so no
-`/dev/rknpu` exists. Use device tree model string instead.
-
-Add a `scripts/label-node-capabilities.sh` that SSHes to each node, probes for
-NPU identity, and applies the appropriate labels via `kubectl label node`. Run
-automatically as part of `bootstrap-phase-b.sh` after nodes are Ready, and
-document as a required step after any module swap (HW-01).
-
 ### E-03: Interruptible workload eviction init container
 
 **Status:** TODO — [BLOCKED on E-01]
@@ -354,7 +161,7 @@ ServiceAccount bound to it, scoped per namespace. Add to the whisper chart
 
 ### E-04: Affinity scheduling validation
 
-**Status:** TODO — [BLOCKED on E-01 (KEDA + Redis), E-02 (capability labels)]
+**Status:** TODO — [BLOCKED on E-01 (KEDA + Redis), E-02 (capability labels, done)]
 
 Dedicated test pass for the model affinity scheduling behaviour described in
 ADR-0027. Specific test scenarios are defined (tracked separately by owner);
@@ -378,7 +185,7 @@ times for warm vs. cold placement.
 
 ### E-05: Orchestrator state management — single query model
 
-**Status:** TODO — [BLOCKED on E-01, E-02]
+**Status:** TODO — [BLOCKED on E-01, E-02 (done)]
 
 The dispatcher that implements ADR-0026 (parallel dispatch) and ADR-0027
 (affinity) needs to know — at dispatch time — which nodes are capable, which are
@@ -455,27 +262,15 @@ This pattern is reusable for any future RKNN-accelerated workload beyond Whisper
 **Note:** `/dev/rknpu` does NOT exist on this cluster (DRM GEM kernel mode).
 Do not reference it in device mount lists.
 
-### W-03: KV-cache decoder for RKNN Whisper
+### W-03: Self-attention KV cache for RKNN Whisper decoder
 
-**Status:** PARTIAL DONE (2026-06-16) — cross-attention KV cache implemented; self-attention KV cache deferred.
-
-Cross-attention KV pre-projection implemented in `tagx/images/whisper-stt/rknn/`:
-- `export_onnx.py --mode kv` exports three ONNX models:
-  1. Audio encoder (unchanged)
-  2. XA-KV encoder — projects audio_features to xa_k/v for all decoder layers (runs once)
-  3. Decoder-with-cached-XA — takes tokens + cached xa_k/v tensors, skips cross-attn projection
-- `convert_rknn.py --mode kv` converts all three to RKNN
-- `infer_rknn_kv.py` implements the inference loop
-
-Output verified numerically identical to standard decoder on CPU (max diff = 0.0).
-Awaiting RKNN conversion and hardware validation on node1.
-
-**Expected speedup:** 24 × 2 cross-attention KV projections over 1500 frames run once
-instead of once per decode step — ~30–50× reduction in cross-attention compute per step.
-
-**Remaining:** self-attention KV cache (avoids rescanning prior self-attn tokens each step)
-would give additional speedup but requires static-shape RKNN buffers for the growing cache.
-Defer until cross-attn KV is validated on hardware and actual decode time measured.
+**Status:** TODO — cross-attention KV cache is done (validated numerically
+identical to CPU, `tagx/images/whisper-stt/rknn/`); this remaining piece avoids
+rescanning prior self-attention tokens each decode step for additional speedup,
+but requires static-shape RKNN buffers for the growing cache. Defer until the
+cross-attention KV path is validated on hardware and actual decode time is
+measured (the compute-saving case for self-attention KV depends on where the
+cross-attention win leaves the remaining bottleneck).
 
 ---
 
@@ -526,7 +321,6 @@ measured **CPU side** and the Whisper capability summary:
   attention/softmax in fp16, quantize the FFN to int8 via
   `hybrid_quantization_step1/step2` (run on **node2**, 32 GB — step1 alone is a
   ~30+ min quantization-analysis pass). Append measured results to the doc.
-- **Determinism — DONE (2026-06-18):** NPU inference is bit-identical run-to-run.
 - **L6 manual double-buffering / non-blocking `rknn_run`** — `async_mode` gives
   no overlap; a lower-level frame-managed path might. Only worth it if a
   marshalling-bound workload needs it.
