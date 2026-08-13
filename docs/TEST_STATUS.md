@@ -14,7 +14,7 @@ and NVMe storage.
 **Coverage note:** Suites 1–3 cover Phase A (bootstrap) only. Phase B shell scripts
 and Helm charts are validated by Suite 4 (manual, requires a running cluster).
 Phase C is not yet implemented. Phase D workloads (Ollama, Agent A, Agent B) are
-validated via `make canary` / `make canary-hm` in the `sibling-app` repo.
+validated via `sibling-app`'s own canary test suite (`make canary`).
 
 ---
 
@@ -372,9 +372,9 @@ shellcheck to CI for static analysis.
 ### Phase D workloads — validated via sibling-app canary, not tpi-bro tests
 
 Ollama, Agent A, Agent B, and Agent C workloads running on the cluster
-are not tested here. They are validated by `make canary` / `make canary-hm` /
-`make canary-cv` in the `sibling-app` repo. Prometheus + Grafana (D-04) is validated
-manually via the Grafana UI on the Tailnet.
+are not tested here. They are validated by `sibling-app`'s own canary test suite
+(`make canary` and its per-agent variants). Prometheus + Grafana (D-04) is
+validated manually via the Grafana UI on the Tailnet.
 
 No tpi-bro-side tests are planned for Phase D; the sibling-app canary targets are the
 right ownership boundary.

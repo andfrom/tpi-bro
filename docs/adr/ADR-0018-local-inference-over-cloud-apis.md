@@ -19,7 +19,7 @@ This is a foundational architectural decision. Every infrastructure and software
 
 ## Rationale
 
-**Privacy and data locality.** User data, input documents, subject profiles, and agent reasoning traces never leave the local network. This is non-negotiable for the use cases this project targets. Cloud API calls create an implicit data-sharing agreement with the API provider.
+**Privacy and data locality.** User data, input documents, structured records, and agent reasoning traces never leave the local network. This is non-negotiable for the use cases this project targets. Cloud API calls create an implicit data-sharing agreement with the API provider.
 
 **Cost model.** Local inference has zero marginal cost per token. Cloud APIs charge per token — at the scale of multi-agent workflows (many calls per session, running continuously) this becomes significant. The hardware cost is a fixed, one-time investment.
 

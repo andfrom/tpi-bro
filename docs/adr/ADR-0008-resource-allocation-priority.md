@@ -5,7 +5,7 @@
 
 ## Context
 
-The cluster runs multiple agents concurrently — some handling the user's current active task, others running background work (batch scoring, re-indexing, model pre-warming, etc.). All share the same finite CPU and RAM per node.
+The cluster runs multiple agents concurrently — some handling the user's current active task, others running background work (batch processing, re-indexing, model pre-warming, etc.). All share the same finite CPU and RAM per node.
 
 Two failure modes to avoid:
 1. **Starvation** — a background job monopolizes a node, freezing interactive agents.
@@ -23,8 +23,8 @@ Define at least two PriorityClasses:
 
 | Class | Value | Who uses it |
 |-------|-------|-------------|
-| `interactive` | 1000 | Agents handling live user requests (e.g., scoring an item the user just opened) |
-| `background`  | 100  | Batch jobs, re-scoring queues, pre-warming, observability scrapers |
+| `interactive` | 1000 | Agents handling live user requests (e.g., processing an item the user just opened) |
+| `background`  | 100  | Batch jobs, re-processing queues, pre-warming, observability scrapers |
 
 A pod with `interactive` priority preempts a `background` pod if the node is under memory pressure. The `background` pod is evicted (and rescheduled when capacity is available), not deleted.
 

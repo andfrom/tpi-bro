@@ -120,7 +120,7 @@ This label is a **platform contract**. It declares:
 
 Checkpoint implementation is the **application's responsibility**. The platform
 guarantees SIGTERM delivery and the grace period. What constitutes a valid
-checkpoint (e.g. last processed audio segment timestamp, last scored job ID) is
+checkpoint (e.g. last processed audio segment timestamp, last processed item ID) is
 defined per workload and must be documented alongside the label declaration.
 
 The label does **not** mean the workload will always be interrupted — only that

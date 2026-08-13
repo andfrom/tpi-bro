@@ -301,9 +301,10 @@ measured **CPU side** and the Whisper capability summary:
 The RK3588 has a 6 TOPS NPU per module (18 TOPS across 3 NVMe nodes). Ollama
 does not use it — CPU-only inference on `llama3.2:1b` takes ~70–150 s per
 request (warm model), making larger models impractical regardless of RAM.
-Validated 2026-05-12: llama3.2:1b on CPU produces unreliable scores (95/100
-for two clearly-mismatched input profiles); the model is too small to apply
-a multi-criterion rubric. A 7B model on NPU is the minimum viable path.
+Validated 2026-05-12: llama3.2:1b on CPU produces unreliable structured
+output (a falsely-confident result on two clearly-mismatched test inputs);
+the model is too small to reliably follow multi-step evaluation
+instructions. A 7B model on NPU is the minimum viable path.
 
 **Why RAM is not the bottleneck**  
 A 13B Q4 model (~7 GB) fits in 16 GB per node. The limit is compute throughput
@@ -342,7 +343,7 @@ with an Ollama-compatible HTTP API, meaning the sibling-app stack (Agent A,
 
 **Suggested first step (self-contained experiment)**  
 Clone `rknn-llm`, convert `llama3.2:1b` on the laptop, run `rkllm-server` on
-a single RK1 node, and score one item end-to-end. This answers the four open
+a single RK1 node, and process one item end-to-end. This answers the four open
 questions (model family support, JSON output stability, conversion toolchain,
 single-node latency) without touching the cluster configuration.
 
@@ -352,8 +353,8 @@ single-node latency) without touching the cluster configuration.
 2. Runtime deployment — build or pull a container image with the RKNN runtime
    + rkllm-server; deploy as a Kubernetes Deployment on an NVMe node with the
    RKNN device node (`/dev/rknpu`) mounted
-3. Benchmark — compare tokens/second and end-to-end scoring latency vs. current
-   CPU-only Ollama baseline; verify score quality with a 7B model
+3. Benchmark — compare tokens/second and end-to-end processing latency vs. current
+   CPU-only Ollama baseline; verify output quality with a 7B model
 4. Rollout — if viable, deploy alongside Ollama as an opt-in endpoint
    (`OLLAMA_URL` → rkllm-server ClusterIP); Ollama stays as fallback
 
