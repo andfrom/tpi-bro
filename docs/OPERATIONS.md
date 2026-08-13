@@ -41,7 +41,7 @@ _Last updated: 2026-06-16 (RKNN NPU inference validated; NPU section added)_
 | Registry (Phase B) | Helm chart (`charts/registry/`), TLS + basic auth | **Running** on node1 (HostPort 5000, PVC 50Gi local-ssd) |
 | Storage | `local-ssd` StorageClass (rancher.io/local-path-ssd, WaitForFirstConsumer) | **Running** in kube-system; scoped to nodes 1–3 (NVMe only) |
 | LLM runtime | Ollama (`charts/ollama/`); one Deployment per NVMe node; 200Gi PVC `local-ssd` | **Running**; `llama3.2:3b` pulled on ollama-node1; namespace `ollama` |
-| Agent | `sibling-app` Agent A; FastAPI on port 18090; `OLLAMA_URL=http://ollama-node1.ollama:11434` | **Deployed**; namespace `sibling-app`; built/deployed via `sibling-app`'s own `Makefile` (`make build-push && make deploy`) — see [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern |
+| Agent | `sibling-app`'s Agent A; FastAPI on port 18090; `OLLAMA_URL=http://ollama-node1.ollama:11434` | **Deployed**; namespace `sibling-app`; built/deployed via `sibling-app`'s own `Makefile` (`make build-push && make deploy`) — see [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern |
 | Network mesh | Tailscale 1.96.4; all 4 nodes + laptop on Tailnet; subnet routes `10.42.0.0/16` + `10.43.0.0/16` advertised via node1 | **Running** — all 3 layers done; `agent-a` exposed on Tailnet |
 | Ingress | Traefik (k3s built-in) | Running (k3s default); superseded by Tailscale operator for service exposure |
 | Observability | kube-prometheus-stack (Prometheus + Grafana + Alertmanager + node-exporter + kube-state-metrics); `charts/monitoring/values.yaml` | **Running**; namespace `monitoring`; Grafana on Tailnet |

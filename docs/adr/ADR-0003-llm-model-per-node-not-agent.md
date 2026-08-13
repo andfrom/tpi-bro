@@ -5,7 +5,7 @@
 
 ## Context
 
-The cluster has 4× RK1 modules with 32 GB RAM each. A realistic application (e.g., the `sibling-app` scoring framework) may have 7 or more agents. Naively requiring one agent per node would cap the system at 4 simultaneously-running agents — unnecessarily restrictive.
+The cluster has 4× RK1 modules with 32 GB RAM each. A realistic application (e.g., the `sibling-app` agent framework) may have 7 or more agents. Naively requiring one agent per node would cap the system at 4 simultaneously-running agents — unnecessarily restrictive.
 
 The actual constraint is at the model level, not the agent level: **a single LLM's weight tensor must reside in contiguous address space on one physical machine**. It cannot be split across nodes. But multiple agent processes can share a node as long as their combined memory demand fits.
 

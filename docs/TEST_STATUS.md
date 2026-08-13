@@ -13,7 +13,7 @@ and NVMe storage.
 
 **Coverage note:** Suites 1–3 cover Phase A (bootstrap) only. Phase B shell scripts
 and Helm charts are validated by Suite 4 (manual, requires a running cluster).
-Phase C is not yet implemented. Phase D workloads (Ollama, Agent A, HM) are
+Phase C is not yet implemented. Phase D workloads (Ollama, Agent A, Agent B) are
 validated via `make canary` / `make canary-hm` in the `sibling-app` repo.
 
 ---

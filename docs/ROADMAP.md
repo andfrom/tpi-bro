@@ -56,7 +56,7 @@ Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Ex
 | B4-gitops | Argo CD or Flux install + platform repo structure | — | Not started |
 | B5-metallb | MetalLB for stable registry VIP | — | Not started |
 | D-01-ollama | Ollama on each NVMe node; one release per node; 200Gi PVC local-ssd | `install-ollama.sh` | **Done** 2026-05-11 |
-| D-02-agent-a | `sibling-app` Agent A Deployment in namespace `sibling-app`; ClusterIP on 18090; arm64 cross-build via QEMU | `sibling-app`'s own `Makefile` (`make build-push && make deploy`); see [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern | **Done** 2026-05-11 |
+| D-02-agent-a | `sibling-app`'s Agent A Deployment in namespace `sibling-app`; ClusterIP on 18090; arm64 cross-build via QEMU | `sibling-app`'s own `Makefile` (`make build-push && make deploy`); see [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern | **Done** 2026-05-11 |
 
 ### Running Phase B (orchestrated)
 

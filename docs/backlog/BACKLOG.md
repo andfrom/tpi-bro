@@ -302,7 +302,7 @@ The RK3588 has a 6 TOPS NPU per module (18 TOPS across 3 NVMe nodes). Ollama
 does not use it — CPU-only inference on `llama3.2:1b` takes ~70–150 s per
 request (warm model), making larger models impractical regardless of RAM.
 Validated 2026-05-12: llama3.2:1b on CPU produces unreliable scores (95/100
-for Profile A vs Profile B); the model is too small to apply
+for two clearly-mismatched input profiles); the model is too small to apply
 a multi-criterion rubric. A 7B model on NPU is the minimum viable path.
 
 **Why RAM is not the bottleneck**  

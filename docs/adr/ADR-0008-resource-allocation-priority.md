@@ -23,7 +23,7 @@ Define at least two PriorityClasses:
 
 | Class | Value | Who uses it |
 |-------|-------|-------------|
-| `interactive` | 1000 | Agents handling live user requests (e.g., scoring an ad the user just opened) |
+| `interactive` | 1000 | Agents handling live user requests (e.g., scoring an item the user just opened) |
 | `background`  | 100  | Batch jobs, re-scoring queues, pre-warming, observability scrapers |
 
 A pod with `interactive` priority preempts a `background` pod if the node is under memory pressure. The `background` pod is evicted (and rescheduled when capacity is available), not deleted.
