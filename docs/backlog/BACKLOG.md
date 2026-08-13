@@ -258,7 +258,8 @@ steps. So the first fan trip is between **48 °C and ~62 °C**, second below 62 
 logged, correlated to the audible speed changes — and pull fan state/RPM from the
 BMC via the `tpi` CLI if it exposes fan telemetry. Produces the actual trip
 temperatures + the fan PWM curve. Operational relevance: CPU-bound batch STT
-(faster-whisper) spins the fans; NPU encode stays silent — matters for noise-sensitive deployments.
+(faster-whisper) spins the fans; NPU encode stays silent — matters for
+noise-sensitive deployments.
 
 ### NC-02: Record CPU thermal + Whisper-per-minute into the datasheet
 **Status:** TODO
