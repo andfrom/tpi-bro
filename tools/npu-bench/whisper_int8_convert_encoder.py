@@ -3,6 +3,7 @@
 #314 test: does INT8 quantization of a real Whisper component produce a usable
 model, or empty/broken output? Run on x86 with rknn-toolkit2 (tagx poetry env).
 """
+import argparse
 import sys
 import types
 import numpy as np
@@ -27,17 +28,25 @@ if not hasattr(onnx, "mapping"):
 
 from rknn.api import RKNN
 
-ONNX = "/path/to/whisper_encoder_medium.onnx"
-DATASET = "/path/to/calib/dataset.txt"
-OUT = "/path/to/whisper_encoder_medium_int8.rknn"
 
-rknn = RKNN(verbose=False)
-rknn.config(target_platform="rk3588", optimization_level=3)
-assert rknn.load_onnx(model=ONNX, inputs=["mel"],
-                      input_size_list=[[1, 80, 3000]]) == 0, "load_onnx failed"
-print("building INT8 (do_quantization=True) with 10 real mel windows...")
-ret = rknn.build(do_quantization=True, dataset=DATASET)
-assert ret == 0, f"build failed: {ret}"
-assert rknn.export_rknn(OUT) == 0, "export failed"
-print(f"OK -> {OUT}")
-rknn.release()
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--onnx", required=True, help="Path to the input encoder ONNX")
+    p.add_argument("--dataset", required=True, help="Path to the calibration dataset.txt")
+    p.add_argument("--out", required=True, help="Output path for the INT8 .rknn")
+    args = p.parse_args()
+
+    rknn = RKNN(verbose=False)
+    rknn.config(target_platform="rk3588", optimization_level=3)
+    assert rknn.load_onnx(model=args.onnx, inputs=["mel"],
+                          input_size_list=[[1, 80, 3000]]) == 0, "load_onnx failed"
+    print("building INT8 (do_quantization=True) with 10 real mel windows...")
+    ret = rknn.build(do_quantization=True, dataset=args.dataset)
+    assert ret == 0, f"build failed: {ret}"
+    assert rknn.export_rknn(args.out) == 0, "export failed"
+    print(f"OK -> {args.out}")
+    rknn.release()
+
+
+if __name__ == "__main__":
+    main()
