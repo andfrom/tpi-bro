@@ -81,9 +81,6 @@ with `--dry-run` on a live node, then proceed with the hardware swap.
 ### DOC-01: Expand README with BMC reconnection steps
 Document how to find the BMC if `turingpi.local` mDNS fails (use `nmap` scan, check router DHCP table, or fall back to Ethernet direct connect).
 
-### DOC-02: LICENSE file
-Add MIT or Apache 2.0 license. Required before open-sourcing.
-
 ### DOC-03: CONTRIBUTING.md
 Contribution guide, issue templates, PR checklist.
 

@@ -278,6 +278,6 @@ Open work items are tracked in [mem/backlog/BACKLOG.md](mem/backlog/BACKLOG.md).
 
 Architectural decisions are recorded in [mem/adr/](mem/adr/).
 
----
+## License
 
-TODO: Add text on LICENSE, DISCLAIMER on LIMITED LIABILITY / "AS IS" (FOSS ethos in "good faith").
+MIT — see [LICENSE](LICENSE). Provided "as is," no warranty — see the license text for the full disclaimer.
