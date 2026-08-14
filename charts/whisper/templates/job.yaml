@@ -4,6 +4,9 @@
 {{- if not .Values.audio.filePath }}
 {{- fail "audio.filePath is required — path to the audio file within audio.claimName." }}
 {{- end }}
+{{- if and .Values.rknn.enabled (eq .Values.language "auto") }}
+{{- fail "language: auto is not supported with rknn.enabled — the RKNN decoder is a fixed-shape greedy loop that needs the language token fixed before decoding starts (see images/whisper-stt/rknn/infer_rknn.py); there is no auto-detection pass like the CPU/faster-whisper path has. Set language to an explicit code (e.g. \"en\")." }}
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:

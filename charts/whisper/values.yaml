@@ -6,6 +6,10 @@ image:
 # Whisper model size (e.g. large-v3, medium). Passed through as WHISPER_MODEL.
 model: large-v3
 
+# "auto" only works on the CPU path. RKNN's decoder is a fixed-shape greedy
+# loop that needs the language token before decoding starts — no auto-detect
+# pass. rknn.enabled: true requires an explicit code here (e.g. "en"); the
+# chart fails fast at template time otherwise.
 language: auto
 beamSize: 5
 

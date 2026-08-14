@@ -30,21 +30,53 @@ the `rknn-toolkit-lite2` pip wheel. It must be provided separately.
 
 ## Decision
 
-### 1. Container access: `--privileged` until device nodes are confirmed
+### 1. Container access: `--privileged` (device node now confirmed, but not sufficient alone)
 
-The exact render node (`renderD128` vs `renderD129`) used by the RKNN runtime
-has not been determined. Until confirmed, containers use `--privileged` for
-RKNN workloads. This is acceptable for batch compute workloads on a single-tenant
-cluster; it is not acceptable for long-running daemons or multi-tenant contexts.
+**Update 2026-08-14 — device node confirmed.** Loaded an RKNN model under
+`--privileged` and inspected the process's open fds (`/proc/<pid>/fd`): the
+NPU runtime opens **`/dev/dri/card1`** (major:minor `226:1`), not either
+`renderD128` or `renderD129` — those belong to a separate device entirely
+(`card1`'s udev devpath is `/devices/platform/fdab0000.npu/drm/card1`, i.e.
+the NPU registers its own primary DRM card node, not a render node). The
+"`renderD128` vs `renderD129`" framing in the original decision below was
+the wrong dichotomy.
 
-Once the specific device node is confirmed (probe script or `lsof` after RKNN
-init), replace `--privileged` with an explicit device allowlist:
+This does **not** mean dropping `--privileged` is a one-line change, though.
+The vendor runtime's own internal `_check_container` sanity check (inside
+`librknnrt`/`rknnlite`, not something this repo controls) unconditionally
+requires **both** `/dev/dri/renderD129` *and* `/proc/device-tree/compatible`
+to be present and readable, regardless of which device is actually opened at
+runtime. `/proc/device-tree` is a symlink to `/sys/firmware/devicetree/base`,
+and `/sys/firmware` is one of Docker's default **masked paths** for
+unprivileged containers — so reading it requires `--security-opt
+systempaths=unconfined` (or `--privileged`, which disables masking
+entirely) even after supplying `--device=/dev/dri/card1` and
+`--device=/dev/dri/renderD129` explicitly.
+
+Past that point, a **further, unresolved** issue appears: with masking
+disabled but without `--privileged`, `init_runtime()` fails SoC
+auto-detection (`_get_target_soc`) and demands an explicit `target=`; passing
+`target="rk3588"` explicitly then routes into the runtime's
+remote-device/simulator code path instead of local inference and fails with
+`Unsupported run platform: Linux aarch64`. This suggests the closed-source
+runtime reads something else under `/sys` for local auto-detection that
+`systempaths=unconfined` alone doesn't fully replicate (undetermined exactly
+what — the library is a compiled `.so`, no source available). Chasing this
+further is vendor-SDK archaeology with no source to read; **not worth it**
+for a single-tenant batch-compute cluster.
+
+**Decision: keep `--privileged` for RKNN workloads.** It reliably works
+end-to-end — validated 2026-08-14 by running the actual `charts/whisper/`
+Helm chart's Job (`rknn.enabled: true`) on rk1-node1 with a real model
+(`medium`) and real audio, producing a correct transcript. Revisit
+least-privilege only if this cluster ever becomes multi-tenant; until then
+the security cost is acceptable for the same reason batch jobs already
+accept it (single-tenant, no long-running daemons).
 
 ```yaml
 securityContext:
-  privileged: false
-devices:
-  - /dev/dri/renderD<N>  # to be determined
+  privileged: true   # /dev/dri/card1 confirmed; least-privilege blocked on
+                      # unresolved vendor runtime SoC auto-detection, see above
 ```
 
 ### 2. librknnrt.so: bake into container image at build time
@@ -95,8 +127,10 @@ or `--privileged` as above.
 
 - All RKNN containers currently run `--privileged`; acceptable for dev/batch
 - E-02 (capability label detection) must use DT model string, not `/dev/rknpu`
-- W-02 (Whisper RKNN Helm chart) uses `privileged: true` until render node confirmed
-- A follow-up task is needed to identify which render node the RKNN runtime uses
-  (run a container with `--privileged`, init the runtime, then `lsof /dev/dri/*`)
+- `charts/whisper/` uses `privileged: true` — confirmed the actual device
+  (`/dev/dri/card1`) 2026-08-14, but least-privilege is blocked on an
+  unresolved vendor-runtime SoC auto-detection issue (see above), not on the
+  device node itself. `rknn.devices` in `charts/whisper/values.yaml` stays
+  empty until that's resolved.
 - `librknnrt.so` version must be kept in sync with `rknn-toolkit-lite2` version
   in tagx Dockerfiles; both are 2.3.2 as of 2026-06-16
