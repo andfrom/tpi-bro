@@ -69,6 +69,18 @@ proc elapsed {secs} {
   return "${s}s"
 }
 proc sh {cmd} { set f [open [list | bash -c $cmd 2>@1] r]; set out [read $f]; catch {close $f}; return $out }
+# Like sh, but propagates the shelled-out command's real exit status instead of
+# silently swallowing it. Use this wherever the caller does `catch {sh ...} out`
+# expecting $rc to reflect success/failure — plain `sh` never sets $rc non-zero
+# regardless of the piped command's outcome (its own `catch {close $f}` eats
+# the CHILDSTATUS error), which let a failed `sudo` be reported as success.
+proc sh_checked {cmd} {
+  set f [open [list | bash -c $cmd 2>@1] r]
+  set out [read $f]
+  set closeErr [catch {close $f} closeMsg]
+  if {$closeErr} { error "$out\n($closeMsg)" }
+  return $out
+}
 proc ask_secret {prompt} {
   catch {stty -echo}
   send_user $prompt
@@ -755,7 +767,7 @@ proc stage_A1_find_bmc {dry stateRef} {
   if {$bmc_mac ne ""} { state_put state "bmc_mac" $bmc_mac }
   say "BMC: $bmc  (MAC $bmc_mac)"
   # Pin turingpi.local in /etc/hosts so tpi works even when mDNS fails.
-  set rc [catch {sh "sudo [file dirname [info script]]/bootstrap-host-helper.sh hosts-append $bmc turingpi.local"} out]
+  set rc [catch {sh_checked "sudo [file dirname [info script]]/bootstrap-host-helper.sh hosts-append $bmc turingpi.local"} out]
   if {$rc} { say "  WARNING: could not update /etc/hosts for BMC: $out" } else { say "  /etc/hosts: $bmc turingpi.local" }
 }
 
@@ -1237,7 +1249,17 @@ proc stage_A6_write_hosts_on_laptop {dry stateRef} {
   }
   if {$dry || [llength $args] == 0} return
   set flat [join $args " "]
-  set rc [catch {sh "sudo [file dirname [info script]]/bootstrap-host-helper.sh hosts-append $flat"} out]
+  set helper "sudo [file dirname [info script]]/bootstrap-host-helper.sh"
+  # Remove any stale entries first — hosts-append only matches on the exact
+  # (ip, name) pair, so a node whose DHCP lease changed since the last run
+  # would otherwise get a second, newer line appended while the old wrong
+  # line stays in place ahead of it, and /etc/hosts resolution uses the
+  # first match. Same fix already applied to the rediscover flow.
+  set node_names {}
+  for {set i 1} {$i <= $::NODE_COUNT} {incr i} { lappend node_names "${::NODE_PREFIX}$i" }
+  set rc [catch {sh_checked "$helper hosts-remove [join $node_names { }]"} out]
+  if {$rc} { say "WARNING: /etc/hosts stale-entry removal failed: $out" }
+  set rc [catch {sh_checked "$helper hosts-append $flat"} out]
   if {$rc} { say "WARNING: /etc/hosts update failed: $out" } else { say "  /etc/hosts updated" }
 }
 
@@ -1362,13 +1384,14 @@ proc do_rediscover {dry stateRef} {
   set node_names {}
   for {set i 1} {$i <= $::NODE_COUNT} {incr i} { lappend node_names "${::NODE_PREFIX}$i" }
   set helper "sudo [file dirname [info script]]/bootstrap-host-helper.sh"
-  sh "$helper hosts-remove [join $node_names { }] turingpi.local"
+  set rc [catch {sh_checked "$helper hosts-remove [join $node_names { }] turingpi.local"} out]
+  if {$rc} { say "WARNING: /etc/hosts stale-entry removal failed: $out" }
   if {[llength $hosts_args] > 0} {
-    set rc [catch {sh "$helper hosts-append [join $hosts_args { }]"} out]
+    set rc [catch {sh_checked "$helper hosts-append [join $hosts_args { }]"} out]
     if {$rc} { say "WARNING: /etc/hosts node update failed: $out" }
   }
   if {$bmc ne ""} {
-    set rc [catch {sh "$helper hosts-append $bmc turingpi.local"} out]
+    set rc [catch {sh_checked "$helper hosts-append $bmc turingpi.local"} out]
     if {$rc} { say "WARNING: /etc/hosts BMC update failed: $out" }
   }
 

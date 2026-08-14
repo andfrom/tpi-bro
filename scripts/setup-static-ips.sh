@@ -24,6 +24,7 @@ DO_NODES=1
 DO_BMC=1
 DO_VERIFY=0
 DRY=0
+YES=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -33,6 +34,7 @@ while [[ $# -gt 0 ]]; do
     --bmc-only)   DO_NODES=0;       shift   ;;
     --verify)     DO_VERIFY=1; DO_NODES=0; DO_BMC=0; shift ;;
     --dry-run)    DRY=1;            shift   ;;
+    --yes)        YES=1;            shift   ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
   esac
 done
@@ -95,6 +97,7 @@ GATEWAY=$(kv_get GATEWAY "$CONFIG_FILE")
 DNS_SERVERS=$(kv_get DNS_SERVERS "$CONFIG_FILE")
 NODE_USER=$(kv_get DEFAULT_USER "$CONFIG_FILE")
 BMC_PASS_CFG=$(kv_get BMC_PASS "$CONFIG_FILE")
+NODE_PASS_CFG=$(kv_get NEW_PASS "$CONFIG_FILE")
 
 [[ -n "$TPI_BASE"    ]] || err "TPI_BASE_IP_ADDR not set in $CONFIG_FILE"
 [[ -n "$GATEWAY"     ]] || err "GATEWAY not set in $CONFIG_FILE"
@@ -129,8 +132,10 @@ if (( DRY )); then
   exit 0
 fi
 
-echo "Press Enter to continue or Ctrl-C to abort."
-read -r
+if (( ! YES )); then
+  echo "Press Enter to continue or Ctrl-C to abort."
+  read -r
+fi
 
 if (( DO_BMC )); then
   if [[ -n "$BMC_PASS_CFG" ]]; then
@@ -143,9 +148,14 @@ if (( DO_BMC )); then
   fi
 fi
 if (( DO_NODES )); then
-  echo -n "Node password (NEW_PASS set during Phase A): "
-  read -rs NODE_PASS
-  echo
+  if [[ -n "$NODE_PASS_CFG" ]]; then
+    NODE_PASS="$NODE_PASS_CFG"
+    info "Node password read from config (NEW_PASS)."
+  else
+    echo -n "Node password (NEW_PASS set during Phase A): "
+    read -rs NODE_PASS
+    echo
+  fi
 fi
 echo
 
@@ -288,9 +298,14 @@ echo NETPLAN_QUEUED" 2>/dev/null || true
 verify_nodes() {
   say "Rebooting all nodes to verify static IP persistence…"
 
-  echo -n "Node password: "
-  read -rs NODE_PASS
-  echo
+  if [[ -n "$NODE_PASS_CFG" ]]; then
+    NODE_PASS="$NODE_PASS_CFG"
+    info "Node password read from config (NEW_PASS)."
+  else
+    echo -n "Node password: "
+    read -rs NODE_PASS
+    echo
+  fi
   echo
 
   # Issue reboots in parallel; ignore errors (session drops when node reboots)

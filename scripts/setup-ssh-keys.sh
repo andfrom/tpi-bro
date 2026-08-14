@@ -99,9 +99,15 @@ if (( DRY )); then
   exit 0
 fi
 
-echo -n "Node password (NEW_PASS set during Phase A): "
-read -rs NODE_PASS
-echo
+NODE_PASS_CFG=$(kv_get NEW_PASS "$CONFIG_FILE")
+if [[ -n "$NODE_PASS_CFG" ]]; then
+  NODE_PASS="$NODE_PASS_CFG"
+  info "Node password read from config (NEW_PASS)."
+else
+  echo -n "Node password (NEW_PASS set during Phase A): "
+  read -rs NODE_PASS
+  echo
+fi
 echo
 
 # ---- per-node setup ---------------------------------------------------------

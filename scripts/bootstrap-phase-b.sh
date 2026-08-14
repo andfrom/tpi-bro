@@ -109,7 +109,8 @@ do_B0_static_ips() {
     bash "${SCRIPT_DIR}/setup-static-ips.sh" \
       --config "$CONFIG_FILE" \
       --state  "$STATE_FILE" \
-      "${DRY_FLAG[@]}"
+      "${DRY_FLAG[@]}" \
+      "${YES_FLAG[@]}"
 }
 
 do_B0_ssh_keys() {
@@ -133,7 +134,8 @@ do_B2_registry() {
     bash "${SCRIPT_DIR}/setup-registry.sh" \
       --config "$CONFIG_FILE" \
       --state  "$STATE_FILE" \
-      "${DRY_FLAG[@]}"
+      "${DRY_FLAG[@]}" \
+      "${YES_FLAG[@]}"
 }
 
 do_B2_auth() {
@@ -142,7 +144,8 @@ do_B2_auth() {
       --config "$CONFIG_FILE" \
       --state  "$STATE_FILE" \
       --enable-auth \
-      "${DRY_FLAG[@]}"
+      "${DRY_FLAG[@]}" \
+      "${YES_FLAG[@]}"
 }
 
 do_B2_verify() {
@@ -151,7 +154,8 @@ do_B2_verify() {
       --config "$CONFIG_FILE" \
       --state  "$STATE_FILE" \
       --verify \
-      "${DRY_FLAG[@]}"
+      "${DRY_FLAG[@]}" \
+      "${YES_FLAG[@]}"
 }
 
 do_B09_mount_ssd() {
