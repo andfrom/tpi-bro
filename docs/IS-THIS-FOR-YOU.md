@@ -48,12 +48,16 @@ transcript out, on both paths:
   not: our own live test today (`medium` model, RK1 hardware, a 3-second
   clip) measured **10.4 s to encode, 55.1 s to decode** (11 tokens, greedy,
   no cache) — much slower than real-time for this exact configuration.
-  Faster KV-cache decoder variants already exist on disk from earlier
-  conversion work, but the chart doesn't default to them yet. **W-03**
-  (self-attention KV cache, layered on the cross-attention KV cache that's
-  already done) is *projected* — not yet measured — at up to ~100× faster
-  decode specifically. Until that lands and is wired into the chart, the
-  honest recommendation for anything latency-sensitive is CPU, not NPU.
+  Faster KV-cache decoder variants exist, and cross-attention caching alone
+  (already working) cuts that to ~1.9 s/step measured. The remaining piece,
+  self-attention caching (**W-03**), gets real measured throughput down
+  further — but is currently *blocked*, not just unbuilt: it produces wrong
+  transcripts on real hardware past the first decode step, a genuine
+  silicon-level bug (the model, its ONNX graph, and even the vendor's own
+  simulator are all verified correct — only the real NPU diverges). See
+  [RKNN-SA-KV-DECODER-BUG.md](RKNN-SA-KV-DECODER-BUG.md). Until a workaround
+  (a validated one exists, not yet built) lands and is wired into the chart,
+  the honest recommendation for anything latency-sensitive is CPU, not NPU.
 
 **Small LLM inference via Ollama** (CPU-only; NPU LLM support is
 unexplored, tracked as [R-01](backlog/BACKLOG.md)) works, but "works" is
@@ -108,6 +112,18 @@ project:
   causing it took per-layer cosine-similarity analysis to find the actual
   collapse point (the attention softmax path); a naive test would have
   blamed calibration data and moved on.
+- **A correctness bug that only exists on real silicon, not the vendor's own
+  simulator.** The self-attention KV-cache decoder (W-03) produced
+  degenerate, wrong transcripts — but the model math, the ONNX graph, and
+  rknn-toolkit2's own x86 CPU simulator (even at full production depth) all
+  check out correct. Only the actual RK3588 NPU diverges, and only once
+  enough attention layers are stacked together (confirmed correct up to 18
+  layers, wrong at the full 24). No compiler flag routes around it — we
+  tried disabling the fusion pass implicated and shrinking the cache 14×,
+  both hit the same wall. What *did* work: building smaller real-hardware
+  slices and testing them on the actual chip until we found the boundary,
+  which points at a genuine hardware/silicon-level limit, not a graph bug.
+  See [RKNN-SA-KV-DECODER-BUG.md](RKNN-SA-KV-DECODER-BUG.md).
 - **Don't count on airockchip to respond.** The upstream issue for the INT8
   bug above ([#314](https://github.com/airockchip/rknn_model_zoo/issues/314))
   was filed by a community member in April 2025; two more people independently

@@ -228,13 +228,17 @@ tagx's ADR-0008 lands.
 
 ### W-03: Self-attention KV cache for RKNN Whisper decoder
 
-**Status:** TODO — cross-attention KV cache is done (validated numerically
-identical to CPU, `tagx/images/whisper-stt/rknn/`); this remaining piece avoids
-rescanning prior self-attention tokens each decode step for additional speedup,
-but requires static-shape RKNN buffers for the growing cache. Defer until the
-cross-attention KV path is validated on hardware and actual decode time is
-measured (the compute-saving case for self-attention KV depends on where the
-cross-attention win leaves the remaining bottleneck).
+**Status:** BLOCKED — implemented, but produces wrong output on real
+hardware; root-caused to a real-RK3588-silicon-specific issue (not the
+model, not the ONNX graph, not even the RKNN x86 simulator — all verified
+correct). Requires a genuine speedup number correction too: real measurement
+puts this at ~2.6–4× (naive → SA-KV), not the "~100×" earlier floated —
+see `docs/ROADMAP.md`. Full root-cause investigation, ruled-out causes, and
+a **validated workaround** (split into two 12-layer `.rknn` models — both
+independently confirmed correct on real hardware, not yet implemented):
+`docs/RKNN-SA-KV-DECODER-BUG.md`. Do not wire `infer_rknn_sa_kv.py` into
+`charts/whisper/` until the split decoder is built — it currently produces
+degenerate, wrong transcripts on real hardware past the first decode step.
 
 ---
 

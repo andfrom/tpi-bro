@@ -94,7 +94,7 @@ Whisper `medium` inference on the RK3588 NPU already works (see `docs/NPU-MODELS
 
 ## Immediate Next Steps
 
-1. **W-03: KV-cache decoder** — split Whisper decoder into cross-attention KV encoder (once) + per-token autoregressive decoder; expected ~100× speedup for NPU decoding.
+1. **W-03: KV-cache decoder** — self-attention KV caching implemented but currently BLOCKED, not just pending: it produces wrong output on real RK3588 hardware past the first decode step (the model, ONNX graph, and RKNN's own x86 simulator are all verified correct — only real silicon diverges). Real measured speedup for the working parts is ~2.6–4×, not the "~100×" this line previously said. A validated workaround (split into two 12-layer models) exists but isn't built yet. See `docs/RKNN-SA-KV-DECODER-BUG.md`.
 2. **large-v3 RKNN conversion** — next model in priority table after medium validated.
 3. **D-00: PriorityClass + ResourceRequests** — add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
 4. **B5-metallb** — stable registry VIP; removes the HostPort-forced node1 pin.
