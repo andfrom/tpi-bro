@@ -94,7 +94,7 @@ Whisper `medium` inference on the RK3588 NPU already works (see `docs/NPU-MODELS
 
 ## Immediate Next Steps
 
-1. **W-03: KV-cache decoder** — self-attention KV caching implemented but currently BLOCKED, not just pending: it produces wrong output on real RK3588 hardware past the first decode step (the model, ONNX graph, and RKNN's own x86 simulator are all verified correct — only real silicon diverges). Real measured speedup for the working parts is ~2.6–4×, not the "~100×" this line previously said. A validated workaround (split into two 12-layer models) exists but isn't built yet. See `docs/RKNN-SA-KV-DECODER-BUG.md`.
+1. **W-03: KV-cache decoder** — root-caused and fixed 2026-08-14: librknnrt silently drops NC1HWC2-native-layout inputs on real hardware; the "input shim" (linear-layout cache inputs, unsqueezed in-model) fixes it at full 24-layer depth — correct transcript on real hardware, ~2.5× measured over the naive decoder (~2,028 vs ~5,009 ms/step), with a projected further ~1.5× from FP16 input feeds. Productionization steps (canonical export mode, chart wiring, FP16 feeds) tracked in `backlog/BACKLOG.md` W-03. See `docs/RKNN-SA-KV-DECODER-BUG.md`.
 2. **large-v3 RKNN conversion** — next model in priority table after medium validated.
 3. **D-00: PriorityClass + ResourceRequests** — add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
 4. **B5-metallb** — stable registry VIP; removes the HostPort-forced node1 pin.

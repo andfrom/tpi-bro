@@ -228,17 +228,28 @@ tagx's ADR-0008 lands.
 
 ### W-03: Self-attention KV cache for RKNN Whisper decoder
 
-**Status:** BLOCKED — implemented, but produces wrong output on real
-hardware; root-caused to a real-RK3588-silicon-specific issue (not the
-model, not the ONNX graph, not even the RKNN x86 simulator — all verified
-correct). Requires a genuine speedup number correction too: real measurement
-puts this at ~2.6–4× (naive → SA-KV), not the "~100×" earlier floated —
-see `docs/ROADMAP.md`. Full root-cause investigation, ruled-out causes, and
-a **validated workaround** (split into two 12-layer `.rknn` models — both
-independently confirmed correct on real hardware, not yet implemented):
-`docs/RKNN-SA-KV-DECODER-BUG.md`. Do not wire `infer_rknn_sa_kv.py` into
-`charts/whisper/` until the split decoder is built — it currently produces
-degenerate, wrong transcripts on real hardware past the first decode step.
+**Status:** UNBLOCKED — root-caused and fixed 2026-08-14 (second-pass
+investigation). The failure was never a silicon/scale limit: librknnrt
+2.3.2 silently never delivers NC1HWC2-native-layout graph inputs on real
+RK3588, at any model size (the earlier "breaks beyond ~18 layers" theory
+was an artifact of an underpowered test — see the "false trail" section of
+`docs/RKNN-SA-KV-DECODER-BUG.md`). The "input shim" (3D cache inputs,
+unsqueezed in-model so they enter in linear layout) routes around it
+entirely: full 24-layer decoder validated on real hardware, correct
+transcript, ~2,028 ms/step vs ~5,009 ms/step naive (~2.5× measured).
+Working artifact: node1
+`/mnt/ssd/whisper-models/rknn/medium/whisper_decoder_sa_kv_step_shim_medium.rknn`.
+
+**Remaining productionization:**
+1. Promote `_DecoderSAKVStepShim` from tagx `debug/` into the canonical
+   `export_onnx.py`/`convert_rknn.py` sa-kv mode; re-export and deploy the
+   production model set.
+2. Wire `infer_rknn_sa_kv.py --shim` into `charts/whisper/` (new decoder
+   env/entrypoint variant).
+3. Apply the FP16-input-feed optimization (projected ~1.5× further, →
+   ~1.3 s/step) and re-verify correctness with
+   `debug/fingerprint_cache_delivery.py` — never with a bare
+   cosine-vs-reference check.
 
 ---
 

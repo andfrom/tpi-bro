@@ -1,242 +1,160 @@
-# Self-attention KV-cache RKNN decoder produces wrong output on real hardware
+# RKNN silently never delivers NC1HWC2-native-layout graph inputs on real RK3588
 
-Root-cause investigation for a bug found while implementing W-03 (self-attention
-KV cache for the RKNN Whisper decoder, `docs/backlog/BACKLOG.md`). The exported
-model (`export_onnx.py --mode sa-kv`, tagx) and its PyTorch source module are
-verified mathematically correct. The **compiled `.rknn` model produces wrong
-output once real (non-degenerate) masked self-attention is exercised** — i.e.
-from the second decode step onward. Not yet filed upstream (no known matching
-issue found; closest is airockchip/rknn-toolkit2#460, see below). Kept open
-here until root-caused further or fixed upstream.
+Root-cause investigation for a bug found implementing W-03 (self-attention KV
+cache for the RKNN Whisper decoder). **Root-caused and worked around
+2026-08-14 (second pass, same day):** on real RK3588 hardware, any graph
+input that the compiled `.rknn` model expects in the NPU's native tiled
+`NC1HWC2` layout is **silently never delivered — the buffer stays
+zero-filled** — while all linear-layout inputs arrive correctly. No error or
+warning is produced at any log level, in userspace or the kernel. The x86
+simulator delivers everything correctly, so the vendor's own testing story
+cannot see this bug. A one-op graph change (the "input shim", below) routes
+around it completely; the full 24-layer SA-KV decoder now produces correct
+transcripts on hardware.
+
+**This document supersedes its own first revision from earlier the same
+day**, which claimed a scale-dependent failure appearing "beyond ~18 layers"
+and a "validated 2×12-layer split-decoder workaround." Both claims were
+wrong, and *how* they were wrong is half the value of this writeup — see
+"The false trail" below. The git history preserves the first revision.
 
 ## Environment
 
-- rknn-toolkit2 2.3.2, rknn-toolkit-lite2 2.3.2, librknnrt 2.3.2, RKNPU driver 0.9.7, RK3588 (TuringPi RK1)
-- Whisper **medium**, self-attention KV-cache decoder (`_DecoderSAKVStep` in tagx's `export_onnx.py`), FP32 ONNX / FP16 RKNN build (`do_quantization=False`)
-- Model architecture: 24 transformer blocks, 16 heads, head_dim 64, n_ctx 448
+- rknn-toolkit2 2.3.2 (conversion, x86), rknn-toolkit-lite2 2.3.2 + librknnrt 2.3.2 (device), RKNPU driver 0.9.7, kernel 6.1.0-1025-rockchip, RK3588 (TuringPi RK1), IOMMU mode
+- Whisper medium SA-KV decoder (`_DecoderSAKVStep`, tagx `export_onnx.py --mode sa-kv`): 99 graph inputs — token, step, sa_mask, 48 SA-cache tensors `(1,16,448,64)`, 48 cross-attention tensors `(1,1500,1024)`
 
-## Symptom (measured, real hardware)
+## The defect, precisely
 
-Real-audio transcription (a synthesized "The quick brown fox jumps over the
-lazy dog" clip) produces a degenerate, repeating transcript: `"The The The
-The"` — decoder confidence (top-token logit) *decreases* each step while the
-predicted token stays constant, then flips to EOT. Classic signature of the
-model not incorporating new cache content.
+The RKNN compiler assigns each graph input a layout based on its first
+consumer:
 
-## Root cause isolation
+| Input | First consumer | Assigned layout | Delivered on real HW? |
+|---|---|---|---|
+| `token`, `step` | Gather | UNDEFINED (linear) | ✓ |
+| `xa_k_*`, `xa_v_*` (48×) | Reshape | UNDEFINED (linear) | ✓ |
+| `sa_mask` | Conv — but via a compiler-inserted on-device `New_input` Transpose | linear at the boundary | ✓ |
+| `sa_k_in_*`, `sa_v_in_*` (48×) | Concat, directly | **NC1HWC2 (native tiled)** | **✗ — read as zeros** |
 
-### Step 0 is not a valid correctness test
+The NC1HWC2 inputs require a host-side tiling conversion inside
+`rknn_inputs_set`. That conversion silently produces nothing on this stack:
+the graph then executes *perfectly* (per-op profiling shows the Concats
+running on the NPU with normal timing and full-size reads) over buffers that
+were never written. This holds at **every model size tested — including a
+1-layer, 7-input model** — so it is not a resource/limit issue at all.
 
-At decode step 0, the self-attention mask has exactly **one** valid position
-(nothing in the cache yet, only the token's own new K/V slot). `softmax` over
-one valid element always outputs weight `1.0` regardless of whether the
-underlying score computation is correct — so step 0 matching a reference
-proves nothing about masking/softmax correctness. It only validates the token
-embedding, K/V projections, cross-attention, and MLP paths (all confirmed
-correct — see below).
+## How it was proven: hypothesis fingerprinting
 
-### Step 1 is the first real test, and it fails
+The decisive instrument (committed as tagx
+`images/whisper-stt/rknn/debug/fingerprint_cache_delivery.py`): capture the
+raw step-1 hardware outputs, then replay the exact same inputs through the
+proven-correct PyTorch reference under explicit corruption hypotheses and
+ask which one the hardware actually matches.
 
-Step 1 introduces the first non-trivial mask (2 valid positions: cache slot 0
-+ the new-K slot) — the first real softmax normalization. Comparing real
-hardware's step-1 output against a proven-correct PyTorch reference (fed the
-*exact* real hardware cache state from step 0, not an idealized one):
+At 24 layers (fresh build, real speech audio):
 
-```
-logits cosine(reference, hardware) = -0.170464   (top5 tokens don't even match)
-```
-
-Per-layer divergence (K/V cache slice cosine similarity, step 1):
-
-| layer | k cos | v cos |
+| hypothesis | logits cos vs HW | mean per-layer k_new cos |
 |---|---|---|
-| 0 | 1.00000 | 1.00000 |
-| 1 | 0.97101 | 0.92599 |
-| 2 | 0.74589 | 0.88474 |
-| 3 | **-0.04056** | 0.83212 |
-| 4–23 | oscillates 0.87–0.98 | oscillates 0.87–0.97 |
+| correct computation | -0.17 | 0.87 |
+| **all caches read as zeros** | **0.9996** | **0.9992** |
+| mask stuck at step-0 | 0.71 | 0.73 |
+| mask ignored | -0.52 | 0.12 |
 
-Layer 0 is exact — its K/V outputs are pure projections of the token
-embedding, independent of any attention weighting, so this doesn't exercise
-masking either. Layer 1 is the first layer whose *input* (`x`, coming from
-layer 0's self-attention-weighted output) already reflects a real
-softmax-over-2-positions computation, and it's already measurably wrong.
+The hardware isn't computing noise — it is computing the **exact model
+function with the cache inputs replaced by zeros**. The same fingerprint wins
+at every depth tested (1, 12, 18, 21, 23, 24 layers), for both the
+June-era production artifact and fresh rebuilds.
 
-## Ruled out
+Everything else that pointed elsewhere was ruled out en route: input dtype
+(values never read can't matter), mask magnitude (same), output ordering
+(cross-correlated all 49 outputs — declared order is correct), ONNX graph
+connectivity (all inputs consumed), the isolated attention op and the
+Concat-including variant (both bit-correct in the simulator), the June
+artifact's provenance (fresh builds fail identically), kernel-side CMA/DMA
+failures (none — dmesg silent, IOMMU mode), and the runtime's own
+memory-table layout (identical strategy in passing and failing configs).
 
-- **Dtype** (feeding the cache/mask as float16 vs. float32): byte-identical
-  output either way — `rknnlite` coerces internally regardless of what's
-  passed in.
-- **Mask literal magnitude** (`-1e9` vs. `-30000`, to dodge FP16 overflow to
-  `-inf`): byte-identical output either way.
-- **Output tensor ordering**: cross-correlated all 49 real-hardware step-0
-  outputs against the reference's per-layer values — the declared ONNX
-  `output_names` order (`logits`, then `sa_k_new_0..23`, then
-  `sa_v_new_0..23`) is exactly what `rknn.inference()` returns. (A raw
-  `verbose=True` build log shows internal graph-scheduling operator order is
-  scrambled — e.g. `sa_k_new_0` and `sa_k_new_12` scheduled adjacently — but
-  that's an internal compiler artifact, not the API's actual return order.)
-- **ONNX graph wiring**: confirmed by direct graph inspection that `sa_mask`
-  is a real input to all 24 layers' score-`Add` nodes, not folded away.
-- **The core masked-attention operation, in isolation**: a minimal
-  standalone model (same shapes — 16 heads, head_dim 64, 449-length masked
-  axis, same 2-valid-position mask as step 1) built and run through
-  rknn-toolkit2's x86 simulator produces output matching the PyTorch
-  reference to cosine 1.000000, including when the `Concat(cache, new-slice)`
-  operation is part of the traced graph (not pre-computed).
-- **Encoder, XA-KV encoder, cross-attention, MLP**: all confirmed correct —
-  step 0 (despite not testing self-attention masking) *does* exercise these
-  paths for all 24 layers, and matches the reference exactly there.
+## The false trail — and why the first revision got it wrong
 
-## Scale-dependent: the bug needs enough layers to appear
+The first investigation used "cosine vs the correct reference at decode
+step 1" as its pass/fail test, which produced this table on real hardware:
 
-Re-running the same isolated-op test as a **stacked, real-weights slice of
-the real model** (first N of medium's 24 blocks, via
-`decoder.blocks = decoder.blocks[:N]`, then the same export→convert→simulate
-pipeline used for the real model) at increasing depth:
-
-| N layers | cosine(ref, rknn-simulator) | Result |
+| layers | cosine vs correct | first-pass verdict |
 |---|---|---|
-| 2 | 0.999999 | MATCH |
-| 12 | 0.999999 | MATCH |
-| 18 | 0.999999 | MATCH |
-| 24 (full model, simulator) | 0.999993 | MATCH (see next section — needed more RAM headroom to build) |
-| 24 (full model, real hardware) | **-0.17** | **MISMATCH** (confirmed above) |
+| 12 | 0.9995 | "PASS" |
+| 18 | 0.9992 | "PASS" |
+| 21 | 0.9975 | "PASS-ish" |
+| 23 | 0.9081 | partial failure |
+| 24 | -0.586 | total failure |
 
-So at every layer count, including the full 24, **the x86 simulator agrees
-with the PyTorch reference.** Only real hardware diverges, and only at full
-depth (real hardware also confirmed correct at 12 and 18 layers — see next
-section). This isn't a scale-dependent compiler bug — it's a real-hardware
-execution issue that needs enough concurrent attention blocks to trigger.
+It looks exactly like a scale-dependent hardware limit appearing between 18
+and 24 layers. It isn't. **The caches are dead at every one of those
+depths** — the fingerprint shows "all dead" beating "none dead" at 12, 18,
+21, 23 and 24 alike. What actually varies with depth is only the *distance
+between the all-dead and correct trajectories* at step 1: with one cached
+token, a shallow stack barely diverges (0.9995 ≈ indistinguishable from
+FP16 noise), a deep stack diverges wildly. The "threshold" was the
+statistical power of a weak test, not a property of the hardware. This is
+also why the first revision's "validated 2×12 split-decoder workaround" was
+invalid: the 12-layer halves it validated were exactly as cache-dead as the
+full model; the validation test just couldn't see it.
 
-## The simulator does NOT reproduce this — it's real-hardware-specific
+Lesson worth keeping: *a correctness test whose sensitivity varies with the
+thing you're bisecting will hand you a beautifully convincing, entirely
+fictional threshold.* Fingerprint against explicit failure hypotheses
+instead of measuring distance-from-correct.
 
-Building the **full 24-layer** model (real weights, real audio, exact
-production shapes) and running it through rknn-toolkit2's x86 CPU simulator
-— the same simulator that's been used for every bisection point above —
-produces **correct** output: `cosine(reference, simulator) = 0.999993`, top5
-tokens identical. Two independent attempts to route around this via
-configuration (disabling the aggressive fusion pass with
-`optimization_level=0`; shrinking the KV-cache size 14× to rule out a
-tensor-size-driven OOM/precision issue) both hit the same simulator-build
-memory ceiling on a 15 GB laptop before reaching 24 layers, and neither
-changed the outcome at layer counts where they *could* run — so this isn't a
-config knob. But the plain, unmodified full-depth build works fine **in the
-simulator**.
+## The fix: the input shim
 
-This means the divergence isn't a graph-compilation bug at all — the same
-compiled model, on the same day, is correct in the simulator and wrong on
-real RK3588 silicon. That reframes the leading hypothesis entirely: this is
-about real NPU execution (actual FP16 hardware arithmetic, on-chip
-scratch/buffer allocation for many concurrent attention blocks, or similar),
-not the compiler's graph transformations.
+If NC1HWC2-at-the-boundary is what breaks, don't let any input be
+NC1HWC2-at-the-boundary. `_DecoderSAKVStepShim` (tagx
+`debug/minimal_repro_nlayer.py`) accepts the caches as 3D
+`(n_head, n_ctx, head_dim)` and unsqueezes to 4D *inside* the model. The
+input's first consumer is then a shape op, the compiler assigns linear
+layout, the host-side copy becomes a plain memcpy, and the NC1HWC2
+conversion happens on-device — where it demonstrably works.
 
-**Validated on real hardware, not just the simulator:** built and ran
-actual `.rknn` files (not simulated) for 12-layer and 18-layer slices,
-via `rknnlite` on rk1-node1:
+Validated end-to-end on real hardware, 2026-08-14:
 
-| N layers | cosine(reference, **real hardware**) | Result |
-|---|---|---|
-| 12 | 0.999468 | MATCH |
-| 18 | 0.999224 | MATCH |
-| 24 (full model) | -0.170464 (step 1, see above) | **MISMATCH** |
+| test | result |
+|---|---|
+| 2-layer shim, fingerprint | "none dead" wins (0.9997 / 1.0000); "all dead" collapses to 0.44 |
+| **24-layer (full) shim vs reference** | **cosine 0.999951, top-5 tokens identical** |
+| 24-layer shim, real speech, full driver (`infer_rknn_sa_kv.py --shim`) | transcript: **"The quick brown fox jumps over the lazy dog."** — correct |
 
-**This gives a working workaround, not just a diagnosis:** splitting the
-24-layer decoder into two sequential 12-layer `.rknn` models (passing the
-intermediate residual stream `x` between them as two separate
-`rknnlite.inference()` calls per decode step) should sidestep the bug
-entirely — both 12-layer halves are independently confirmed correct on real
-silicon. Not yet implemented (`export_onnx.py`/`convert_rknn.py` only
-support single monolithic decoders today); this is the natural next step if
-picking this back up. Reproduction: `debug/minimal_repro_nlayer.py --layers N
---export-rknn out.rknn` builds a real, hardware-loadable N-layer slice of the
-actual model; `debug/real_hw_check.py` runs it on real hardware and compares
-against the saved reference.
+Decode speed with the shim: ~2,028 ms/step (FP32 host feeds), vs ~5,009
+ms/step for the chart's current full-recompute decoder — **~2.5× measured**,
+before the documented FP16-input-feed optimization (projected ~1.5× more) is
+applied. The working artifact is preserved on node1 at
+`/mnt/ssd/whisper-models/rknn/medium/whisper_decoder_sa_kv_step_shim_medium.rknn`
+(debug-pipeline build; the canonical `export_onnx.py`/`convert_rknn.py`
+shim mode is the remaining productionization step).
 
-## Leading hypothesis: real-silicon execution of the fused SDPA op, at scale
+## Minimal upstream repro
 
-`rknn-toolkit2` recognizes the `MatMul → Add(mask) → Softmax → MatMul`
-pattern and fuses it into an internal SDPA-family operator
-(`fuse_matmul_softmax_matmul_to_sdpa`, confirmed present in the build log —
-this fusion happens identically at every layer count tested, including the
-2-layer case that's correct everywhere and the 24-layer case that's correct
-in the simulator but wrong on real hardware). So the fusion *decision* isn't
-the bug — the compiled graph is the same either way. What differs is only
-*where* it runs: the x86 simulator's software emulation of the fused op vs.
-the RK3588's actual NPU silicon executing it. Combined with the real-hardware
-12/18-layer results above, the most consistent explanation is that real NPU
-execution of many concurrent/pipelined fused-SDPA blocks hits a hardware or
-driver-level resource limit (on-chip scratch buffer capacity, scheduling,
-FP16 arithmetic edge case under load) that the simulator — running on a CPU
-with no such constraint — cannot reproduce.
+A **1-layer, 7-input** model (`debug/minimal_repro_nlayer.py --layers 1
+--export-rknn m.rknn` + `debug/real_hw_check.py`) reproduces the full
+defect: hardware cosine 0.40 vs correct, fingerprint matches all-dead at
+0.9955. Nothing about model size, input count, or memory pressure is
+involved. Not yet filed upstream (gated on this repo going public, same as
+the INT8 report — see `RKNN-INT8-WHISPER-314.md`'s vendor-response tracker
+for why expectations are low); no matching known issue found
+([airockchip/rknn-toolkit2#460](https://github.com/airockchip/rknn-toolkit2/issues/460)
+is the nearest neighbor — same toolkit/target, attention-related accuracy
+loss, no maintainer response).
 
-**Closely related, independently-filed, still-open upstream issue:**
-[airockchip/rknn-toolkit2#460](https://github.com/airockchip/rknn-toolkit2/issues/460)
-— same toolkit version (2.3.2), same target (RK3588), same fusion family
-(`exSDPAttention`/`exNorm`), reporter also suspects FP16 Softmax precision,
-no maintainer response. Not confirmed to be the same root cause, but the
-closest match found after a dedicated search — see also
-[#415](https://github.com/airockchip/rknn-toolkit2/issues/415) (FP16-range
-overflow silently cascading through downstream layers, structurally the same
-failure shape: fine early, degrades with depth) and
-[#463](https://github.com/airockchip/rknn-toolkit2/issues/463) (unanswered
-question about whether RKNN ops protect intermediate values from FP16 range
-at all).
+## Reproduction toolkit (tagx `images/whisper-stt/rknn/debug/`)
 
-## Reproduction
-
-All scripts below are self-contained (real pretrained weights, no dataset
-needed beyond `openai-whisper`'s own model download) and run via
-`poetry run python3 <script>` from the `tagx` repo root:
-
-- `images/whisper-stt/rknn/debug/test_sa_kv_reference.py` — PyTorch-only
-  correctness check of `_DecoderSAKVStep` against Whisper's own full-context
-  decode. Confirms the exported module's math is correct in isolation.
-- `images/whisper-stt/rknn/debug/minimal_repro_attn.py` — isolated masked
-  self-attention op (no Concat), simulator-only. Confirms the base op is
-  correct.
-- `images/whisper-stt/rknn/debug/minimal_repro_attn_concat.py` — same, with
-  the `Concat(cache, new-slice)` op included in the traced graph. Confirms
-  Concat isn't the issue either.
-- `images/whisper-stt/rknn/debug/minimal_repro_nlayer.py --layers N
-  [--export-rknn out.rknn]` — real model, real weights, truncated to the
-  first N transformer blocks; exports and converts, then either runs both
-  decode steps through the RKNN simulator, or (with `--export-rknn`) writes
-  a real hardware-loadable `.rknn` plus a `.testdata.npz` of the exact
-  inputs and reference logits, for testing on the actual device. Used to
-  bisect the layer-count threshold above, on both the simulator and real
-  hardware.
-- `images/whisper-stt/rknn/debug/real_hw_check.py --rknn out.rknn --testdata
-  out.testdata.npz` — the real-hardware counterpart: loads an
-  `--export-rknn`'d model via `rknnlite`, runs it, and compares against the
-  saved reference. Run this on the RK3588 node (inside the
-  `tagx/whisper-stt:rknn` image or anywhere `rknnlite` is installed), not on
-  the conversion laptop.
-
-`infer_rknn_sa_kv.py` (the full driver, wired for `charts/whisper/` the same
-way `infer_rknn_kv.py` is) exists and runs end-to-end, but **do not treat its
-output as correct** — it faithfully reproduces this bug. It's kept committed
-(rather than left as gitignored scratch work, which is what happened to the
-*previous* SA-KV investigation and is why this bug went unnoticed until now)
-specifically so the next person picking this up has working scaffolding
-instead of starting over.
+- `test_sa_kv_reference.py` — PyTorch-only correctness of the exported module (bit-perfect).
+- `minimal_repro_attn.py`, `minimal_repro_attn_concat.py` — isolated-op simulator repros (both correct; the bug is not in the op).
+- `minimal_repro_nlayer.py --layers N [--n-ctx C] [--input-shim] [--export-rknn out.rknn]` — real-weights N-layer slice: simulator run, or hardware-loadable export + exact test inputs/reference.
+- `real_hw_check.py --rknn m.rknn --testdata t.npz [--save-outputs hw.npz]` — device-side check + raw-output capture.
+- `fingerprint_cache_delivery.py --layers N --testdata t.npz --hw-outputs hw.npz` — the corruption-hypothesis matcher; the tool that cracked this.
 
 ## Status
 
-**W-03 is blocked, not just unimplemented — but a workaround path exists.**
-The chart-side infrastructure and the driver exist; the compiled 24-layer
-model produces incorrect output for any decode beyond the first token, on
-real hardware specifically (the x86 simulator is correct at every layer
-count tested, including the full 24). Real hardware is independently
-confirmed correct at 12 and 18 layers. Do not wire `infer_rknn_sa_kv.py`
-into `charts/whisper/` as-is — it would ship a decoder that silently
-produces wrong transcripts, worse than the current (slower, but correct)
-full-recompute decoder already in the chart.
-
-**Next step if picked back up:** implement a split decoder — two sequential
-12-layer `.rknn` models (extending `export_onnx.py`'s `_DecoderSAKVStep` to
-optionally take/return an intermediate residual `x` at a layer boundary,
-and `convert_rknn.py` to build both halves) instead of one monolithic
-24-layer graph, chained via two `rknnlite.inference()` calls per decode
-step. Both halves are independently validated correct on real silicon
-above; this hasn't been built yet, only validated as a viable approach.
+**W-03 unblocked.** The full-depth SA-KV decoder produces correct
+transcripts on real hardware using the shim. Remaining productionization
+(tracked in `backlog/BACKLOG.md` W-03): move the shim into the canonical
+export/convert pipeline, re-export/deploy the production model set, wire the
+`--shim` driver path into `charts/whisper/`, then apply and *re-verify with
+the fingerprint tool* the FP16-input-feed optimization.
