@@ -94,10 +94,14 @@ Whisper `medium` inference on the RK3588 NPU already works (see `docs/NPU-MODELS
 
 ## Immediate Next Steps
 
-1. **W-03: KV-cache decoder** — root-caused and fixed 2026-08-14: librknnrt silently drops NC1HWC2-native-layout inputs on real hardware; the "input shim" (linear-layout cache inputs, unsqueezed in-model) fixes it at full 24-layer depth — correct transcript on real hardware, ~2.5× measured over the naive decoder (~2,028 vs ~5,009 ms/step), with a projected further ~1.5× from FP16 input feeds. Productionization steps (canonical export mode, chart wiring, FP16 feeds) tracked in `backlog/BACKLOG.md` W-03. See `docs/RKNN-SA-KV-DECODER-BUG.md`.
-2. **large-v3 RKNN conversion** — next model in priority table after medium validated.
-3. **D-00: PriorityClass + ResourceRequests** — add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
-4. **B5-metallb** — stable registry VIP; removes the HostPort-forced node1 pin.
+1. **large-v3 RKNN conversion** — next model in priority table after medium validated (now including its SA-KV shim decoder; see `docs/RKNN-SA-KV-DECODER-BUG.md`).
+2. **B5-metallb** — stable registry VIP; removes the HostPort-forced node1 pin.
+
+(W-03 KV-cache decoder: done 2026-08-14 — root-caused, fixed via the input
+shim, productionized into `charts/whisper/` at ~2.5× the naive decoder.
+D-00 resource policy: fully re-applied 2026-08-15 after the reflash —
+PriorityClasses + LimitRanges live, with the LimitRange's CPU default limit
+removed after it was found to block Ollama pod creation outright.)
 
 (NPU device node confirmed 2026-08-14 — it's `/dev/dri/card1`, not a `renderD*`
 node. `--privileged` stays regardless: the vendor runtime's own SoC

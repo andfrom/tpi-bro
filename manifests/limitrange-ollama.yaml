@@ -9,8 +9,15 @@ spec:
       defaultRequest:
         cpu: "100m"
         memory: "256Mi"
+      # No CPU default limit on purpose: a defaulted CPU limit is injected
+      # into any container that sets a cpu request but no cpu limit, and if
+      # the request exceeds the injected limit the pod is REJECTED outright —
+      # charts/ollama requests cpu: "2", which a cpu default of "1" here
+      # blocked entirely (found 2026-08-15 when D-00 was re-applied to the
+      # rebuilt cluster). CPU limits also only throttle; eviction protection
+      # comes from requests + PriorityClasses. Memory keeps a default limit
+      # because memory is the actual OOM risk this policy exists to contain.
       default:
-        cpu: "1"
         memory: "4Gi"
       max:
         memory: "28Gi"
