@@ -1,64 +1,22 @@
 # tpi-bro — Roadmap
 
-_Last updated: 2026-08-14 (Phase B + N-01 Tailscale mesh rebuilt from scratch after a fresh-run test reflashed the nodes; B-04 GitOps done; D-01/D-02 intentionally not redeployed — see note below)_
+_Last updated: 2026-08-14_
 
 ## Summary
 
 tpi-bro bootstraps a TuringPi 2 board (4× RK1 ARM64 compute modules) from bare metal to a Kubernetes-ready cluster state. The project is split into a one-time imperative Phase A (Expect script) and a declarative Phase B+ (k3s + GitOps).
 
+This file tracks what's ahead. For what's already built, see git history and commit messages — same convention as `backlog/BACKLOG.md`. For current live cluster state (versions, what's actually running right now), see `docs/OPERATIONS.md`.
+
 ---
 
 ## Phase A — Bootstrap (Expect Script)
 
-**Overall: COMPLETE** (all stages implemented, tested, and committed)
-
-| Stage | Name | Status | Notes |
-|-------|------|--------|-------|
-| A0 | bmc_firmware | Done | BMC version check/upgrade; dry-run-safe; controlled by `--bmc-firmware skip\|check\|upgrade` |
-| A1 | find_bmc | Done | nmap scan + manual fallback; pins `turingpi.local` in `/etc/hosts`; extracts BMC MAC |
-| A2 | poweroff_all | Done | Real `tpi power off` via exec; no artificial sleeps |
-| A3 | flash_optional | Done | Five modes: `skip` / `local` / `image` / `download` / `bmc`; SHA256 verification + local cache for download mode; `bmc` mode downloads directly to BMC SD card (avoids large laptop upload) |
-| A4 | power_on_and_discover | Done | Real `tpi power on -n N`; delta-based IP discovery; MAC extraction; DHCP reservation summary |
-| A5 | name_password_reboot | Done | Sets hostname + password via SSH; event-driven reboot wait |
-| A6 | write_hosts_on_laptop | Done | Appends node IP↔hostname to `/etc/hosts` via bootstrap-host-helper.sh |
-| A7 | ephemeral_registry_phaseA | Done | Docker registry:2, HTTP, port 5000, restart=always |
-
-**`--rediscover` mode:** Done — scans subnet, identifies nodes by SSH hostname, updates state + `/etc/hosts`. No power cycling.
-
-**Config file support:** Done — `--config FILE` (or auto-load `bootstrap-config.kv`); CLI flags override file values; all tuneable vars exposed. See `bootstrap-config.kv.example`.
-
-**Teardown script (`teardown-cluster.exp`):** Done — T1–T8 stages; DHCP-resilient node location in T1; graceful poweroff + tpi hard-off in T7; symmetric `/etc/hosts` cleanup in T6.
-
-**Automated tests:** Done — `tests/run-ci.sh` (27 tests, Suites 1+2, no hardware); `tests/run-hardware.sh` (Suite 3, cluster cycles). CI runs on every push/PR via GitHub Actions (`.github/workflows/ci.yml`).
-
----
+Complete. Usage: `docs/GETTING-STARTED.md`, `./scripts/bootstrap-turingpi-cluster.exp --help`.
 
 ## Phase B — k3s + Persistent Registry
 
-**Overall: B0–B9 + B4-gitops COMPLETE. D-01/D-02 were done 2026-05-11 but are not currently deployed** — see note under the table.
-
-Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Expect script's job ends at A7.
-
-| Step | What | Script | Status |
-|------|------|--------|--------|
-| B0-static-ips | Static IPs on BMC + all nodes; netplan on Ubuntu, ifupdown on BMC | `setup-static-ips.sh` | **Done** 2026-05-09 |
-| B0-ssh | SSH key auth + passwordless sudo on all nodes | `setup-ssh-keys.sh` | **Done** 2026-05-09 |
-| B1-k3s | k3s server on node1 + agents on nodes 2–4 | `install-k3s.sh` | **Done** 2026-05-09; rebuilt 2026-08-14 (v1.36.3+k3s1) |
-| B1-kubeconfig | Laptop kubeconfig at `~/.kube/config` | `install-k3s.sh --kubeconfig` | **Done** 2026-05-09 |
-| B2-certs | TLS cert + self-signed CA (SAN: hostname + static IP) | `gen-registry-certs.sh` (via `setup-registry.sh`) | **Done** 2026-05-11 |
-| B2-registry | Helm chart deployed; HostPort 5000 on node1; PVC local-path 50Gi | `setup-registry.sh` | **Done** 2026-05-11 |
-| B2-ca | CA distributed to all 4 nodes; `registries.yaml` mirror configured; services restarted | `install-ca.sh` (via `setup-registry.sh`) | **Done** 2026-05-11 |
-| B2-laptop | Laptop Docker CA trust automated (idempotent; restarts Docker only when cert changes) | `setup-registry.sh` | **Done** 2026-05-11 |
-| B2-verify | `docker push` + `docker pull` from laptop verified end-to-end | `setup-registry.sh --verify` | **Done** 2026-05-11 |
-| B2-auth | Registry basic auth (`auth.enabled=true` + htpasswd Secret from `~/.turingpi/credentials.kv`) | `setup-registry.sh --enable-auth` | **Done** 2026-05-11 |
-| B2-pod-pull | k3s pod on rk1-node3 pulled `rk1-node1:5000/test:latest` in 505ms via containerd mirror | `kubectl run test-pull …` | **Done** 2026-05-11 |
-| B3-ssd | Mount NVMe SSD on nodes 1–3; `local-ssd` StorageClass; registry PVC migrated to SSD | `mount-ssd.sh` + `setup-registry.sh --migrate-pvc` | **Done** 2026-05-11; rebuilt 2026-08-14 |
-| B4-gitops | Flux install + `gitops/` platform repo structure; syncs via a read-only deploy key | `flux install` (no dedicated script yet) | **Done** 2026-08-14 |
-| B5-metallb | MetalLB for stable registry VIP | — | Not started |
-| D-01-ollama | Ollama on each NVMe node; one release per node; 200Gi PVC local-ssd | `install-ollama.sh` | Done 2026-05-11; **not currently deployed** (see note below) |
-| D-02-agent-a | `sibling-app`'s Agent A Deployment in namespace `sibling-app`; ClusterIP on 18090; arm64 cross-build via QEMU | `sibling-app`'s own `Makefile` (`make build-push && make deploy`); see [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern | Done 2026-05-11; **not currently deployed** (see note below) |
-
-> **2026-08-14 note:** A fresh-run Phase A test reflashed all 4 nodes, wiping everything from Phase B onward. B0 through B4-gitops were rebuilt the same day. D-01 (Ollama) and D-02 (Agent A) were **deliberately not redeployed** — sibling-app's agents are not meant to run on this cluster, so their "Done" dates above reflect the original 2026-05-11 work, not current state.
+Complete through B4-gitops. Open: **B5-metallb** (stable registry VIP, removes the HostPort-forced node1 pin — see `backlog/BACKLOG.md`).
 
 ### Running Phase B (orchestrated)
 
@@ -81,11 +39,12 @@ order with `--from`/`--to` resume support and `--dry-run`:
 
 **Interactive prompts (B0 only):**
 - `setup-static-ips.sh` prompts for the BMC root password and the Ubuntu node
-  password (the password set during Phase A). There is also a "Press Enter to
-  confirm" gate before IP changes are applied.
+  password (the password set during Phase A) unless both are already set in
+  `bootstrap-config.kv` (`BMC_PASS`, `NEW_PASS`). There is also a "Press Enter to
+  confirm" gate before IP changes are applied, skippable with `--yes`.
 - `setup-ssh-keys.sh` prompts for the Ubuntu node password again to distribute the
-  SSH public key. After this step, key-based auth is in place and no further
-  password prompts occur.
+  SSH public key, same config fallback. After this step, key-based auth is in
+  place and no further password prompts occur.
 
 All stages from B1 onward are fully non-interactive.
 
@@ -115,39 +74,17 @@ Prerequisite: `helm` must be installed on the laptop (see `docs/PREREQUISITES.md
 
 Exit 0 only if all enabled checks pass.
 
----
-
 ## Phase C — Resilience + Laptop Mirror
 
-**Overall: NOT STARTED** (blocked on Phase B)
-
----
+Not started (blocked on Phase B). See `backlog/BACKLOG.md` (C-01 through C-03).
 
 ## Phase D — Multi-Agent Workloads
 
-**Overall: D-01 + D-02 were built 2026-05-11 but are not currently deployed — sibling-app's agents are intentionally kept off this cluster (see note in the Phase B table).** D-04 (monitoring) is also not currently deployed.
+Ollama, Agent A, and monitoring are not currently deployed — sibling-app's agents are intentionally kept off this cluster, and monitoring hasn't been redeployed alongside them. See `docs/OPERATIONS.md` for the reasoning and current state.
 
----
+## NPU / Whisper
 
-## NPU / RKNN Status (as of 2026-06-16)
-
-Initial NPU inference validated. Whisper `medium` runs on the RK3588 NPU (6 TOPS)
-via the `rknn-toolkit2` / `rknn-toolkit-lite2` pipeline.
-
-| Item | Status |
-|------|--------|
-| RKNN conversion (x86 laptop) | **Done** — `export_onnx.py` + `convert_rknn.py` in `tagx/images/whisper-stt/rknn/` |
-| RKNN inference container | **Done** — `tagx/images/whisper-stt/Dockerfile.rknn`; `rknn-toolkit-lite2` + `librknnrt.so` baked in |
-| Whisper `medium` on NPU (node1) | **Validated** — encoder 10.4s; decoder 240s no-KV-cache; Swedish confirmed |
-| KV-cache decoder (W-03) | **Not started** — current decoder is ~100× too slow; needs split export |
-| NPU device node identification | **Open** — `--privileged` used; exact render node (renderD128/129) not yet confirmed |
-| `large-v3` RKNN conversion | **Not started** — next in priority table after medium validated |
-| NPU utilisation metrics | **Not started** — no custom Prometheus exporter yet |
-
-**Key docs:**
-- `docs/NPU-MODELS.md` — benchmarks (CPU baseline + RKNN results), model sizes, device access
-- `adr/ADR-0023-rknn-npu-device-access-pattern.md` — DRM GEM mode, librknnrt.so, detection
-- `tagx/mem/adr/ADR-0002-rknn-container-conventions.md` — 9 build/runtime conventions
+Whisper `medium` inference on the RK3588 NPU already works (see `docs/NPU-MODELS.md`, `adr/ADR-0023-rknn-npu-device-access-pattern.md`). Open work is tracked in `backlog/BACKLOG.md` under **Whisper STT** (W-01–W-03) and **NPU Characterization** (NC-01–NC-03) — not duplicated here.
 
 ---
 
@@ -157,6 +94,6 @@ via the `rknn-toolkit2` / `rknn-toolkit-lite2` pipeline.
 2. **NPU device node (E-02)** — confirm which `/dev/dri/renderD*` node the RKNN runtime uses; replace `--privileged` with explicit device mount.
 3. **large-v3 RKNN conversion** — next model in priority table after medium validated.
 4. **D-00: PriorityClass + ResourceRequests** — add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
-5. **MetalLB (B-05 / C-01)** — stable registry VIP; removes the HostPort-forced node1 pin.
+5. **B5-metallb** — stable registry VIP; removes the HostPort-forced node1 pin.
 
 See `docs/OPERATIONS.md` for hardware inventory, access methods, and current cluster state, and `backlog/BACKLOG.md` for the ordered backlog.
