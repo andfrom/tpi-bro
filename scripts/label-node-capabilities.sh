@@ -68,7 +68,10 @@ ERRORS=0
 
 for (( i=1; i<=NODE_COUNT; i++ )); do
   node_name="rk1-node${i}"
-  node_ip=$(ip_add "$TPI_BASE" "$i")
+  # Resolve by hostname (via /etc/hosts) rather than computing the LAN IP
+  # directly — works whether /etc/hosts currently points at LAN or Tailscale
+  # addresses, instead of assuming LAN reachability.
+  node_ip="$node_name"
 
   echo -e "${CYAN}${node_name}${NC} (${node_ip})"
 

@@ -32,20 +32,15 @@ fail() { echo -e "  ${RED}FAIL${NC} [$1]: $2"; ((FAIL++)); }
 skip() { echo -e "  ${YELLOW}SKIP${NC} [$1]: $2"; ((SKIP++)); }
 
 kv_get() { grep -E "^${1}=" "$2" 2>/dev/null | head -1 | cut -d= -f2- || true; }
-ip_add()  { local p="${1%.*}" l="${1##*.}"; echo "${p}.$((l + $2))"; }
 
 # ── load config ──────────────────────────────────────────────────────────────
 
 [[ -f "$CONFIG_FILE" ]] || { echo "ERROR: config not found: $CONFIG_FILE"; exit 1; }
 
-TPI_BASE=$(kv_get TPI_BASE_IP_ADDR "$CONFIG_FILE")
 SERVER_IDX=$(kv_get SERVER_NODE_IDX "$CONFIG_FILE"); SERVER_IDX="${SERVER_IDX:-1}"
 NODE_COUNT=$(kv_get NODE_COUNT      "$CONFIG_FILE"); NODE_COUNT="${NODE_COUNT:-4}"
 CERT_DIR_CFG=$(kv_get CERT_DIR      "$CONFIG_FILE"); CERT_DIR="${CERT_DIR_CFG:-./registry-certs}"
 
-[[ -n "$TPI_BASE" ]] || { echo "ERROR: TPI_BASE_IP_ADDR not set in $CONFIG_FILE"; exit 1; }
-
-SERVER_IP=$(ip_add "$TPI_BASE" "$SERVER_IDX")
 REGISTRY_ADDR="rk1-node${SERVER_IDX}:5000"
 
 REG_USER=""; REG_PASS=""
@@ -108,7 +103,7 @@ fi
 if (( CA_OK )); then
   http_code=$(curl -s -o /dev/null -w "%{http_code}" \
     --cacert "${CERT_DIR}/myCA.crt" --max-time 5 \
-    "https://${SERVER_IP}:5000/v2/" 2>/dev/null)
+    "https://${REGISTRY_ADDR}/v2/" 2>/dev/null)
   if [[ "$http_code" == "401" || "$http_code" == "200" ]]; then
     pass "C04 registry-tls (HTTP ${http_code})"
   else
@@ -128,7 +123,7 @@ else
   auth_code=$(curl -s -o /dev/null -w "%{http_code}" \
     --cacert "${CERT_DIR}/myCA.crt" --max-time 5 \
     -u "${REG_USER}:${REG_PASS}" \
-    "https://${SERVER_IP}:5000/v2/" 2>/dev/null)
+    "https://${REGISTRY_ADDR}/v2/" 2>/dev/null)
   if [[ "$auth_code" == "200" ]]; then
     pass "C05 registry-auth"
   else
@@ -165,7 +160,7 @@ else
     else
       catalog=$(curl -s --cacert "${CERT_DIR}/myCA.crt" --max-time 5 \
         -u "${REG_USER}:${REG_PASS}" \
-        "https://${SERVER_IP}:5000/v2/_catalog" 2>/dev/null)
+        "https://${REGISTRY_ADDR}/v2/_catalog" 2>/dev/null)
       if echo "$catalog" | grep -q "health-check"; then
         pass "C06 registry-push"
         PUSH_OK=1

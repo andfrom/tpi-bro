@@ -188,45 +188,26 @@ layer. No per-node SSH at dispatch time — a single API server query only.
 
 ### W-01: Helm chart for batch STT jobs with model cache (CPU)
 
-**Status:** TODO — [BLOCKED on `tagx/whisper-stt` CPU image being pushed to the
-cluster registry]
+**Status:** Chart done (`charts/whisper/`), CPU path itself still BLOCKED —
+not on a registry push anymore, but on `images/whisper-stt/app/` not existing
+in tagx at all. The Dockerfile (`COPY app/ /app/`) references a directory
+that was never created — this needs actual application code (a faster-whisper
+wrapper) written in tagx before there's anything to build, let alone push.
+Confirmed by trying: `docker buildx build` fails immediately with
+`"/app": not found`.
 
-Add `charts/whisper/` — a reusable Helm chart for running Whisper transcription
-as a one-shot Kubernetes Job. Modelled on `charts/ollama/`: PVC for model weights
-on `local-ssd`, `nodeAffinity` on `storage.tpi-bro/nvme=true` to keep the model
-cache co-located with the pod.
+One-shot Job (not a Deployment), modelled on `charts/ollama/` but using
+capability-based `nodeAffinity` (`storage.tpi-bro/nvme=true`, plus
+`tpi-bro/npu=rk3588` when `rknn.enabled`) rather than a hard node pin — this
+workload doesn't need a *specific* node the way Ollama's model cache does.
 
 Key chart values:
 - `image.repository` / `image.tag` — caller supplies the tagx image reference
 - `model` — Whisper model size (e.g. `large-v3`)
 - `modelCache` — path inside container where `/models` is mounted (default `/models`)
 - `language`, `beamSize` — passed through as env vars to the container
-
-The chart is application-agnostic: callers specify their own namespace and audio
-input via values. tpi-bro provides the scheduling and storage pattern only.
-
-### W-02: RKNN device mount pattern for whisper-stt
-
-**Status:** PARTIALLY UNBLOCKED — `tagx/whisper-stt:rknn` image exists and
-validated on node1. Exact device nodes still unknown (see ADR-0023).
-
-Extend `charts/whisper/` with an `rknn.enabled` flag that conditionally adds
-NPU device mounts. Current validated approach uses `--privileged`; once ADR-0023
-resolves the exact device nodes for DRM GEM mode, replace with an explicit
-allowlist:
-
-```yaml
-# placeholder — to be updated once device nodes are confirmed
-devices:
-  - /dev/dri/renderD128   # likely the NPU render node (unconfirmed)
-  - /dev/mpp_service      # Rockchip MPP (confirmed present)
-```
-
-With `rknn.enabled: false` (default) the chart deploys the CPU variant cleanly.
-This pattern is reusable for any future RKNN-accelerated workload beyond Whisper.
-
-**Note:** `/dev/rknpu` does NOT exist on this cluster (DRM GEM kernel mode).
-Do not reference it in device mount lists.
+- `audio.claimName` / `audio.filePath` — caller-supplied existing PVC + path;
+  tpi-bro provides scheduling/storage only, not the audio itself
 
 ### W-03: Self-attention KV cache for RKNN Whisper decoder
 

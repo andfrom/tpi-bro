@@ -31,6 +31,7 @@ audio:
 #   devices:
 #     - /dev/dri/renderD128   # likely the NPU render node (unconfirmed)
 #     - /dev/mpp_service      # Rockchip MPP (confirmed present)
+# /dev/rknpu does NOT exist on this cluster (DRM GEM kernel mode) — don't add it.
 rknn:
   enabled: false
   privileged: true
