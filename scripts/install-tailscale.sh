@@ -46,6 +46,8 @@ say()     { echo "==> $*"; }
 info()    { echo "    $*"; }
 err()     { echo "ERROR: $*" >&2; exit 1; }
 
+SERVER_IDX=$(kv_get SERVER_NODE_IDX "$CONFIG_FILE"); SERVER_IDX="${SERVER_IDX:-1}"
+
 node_ssh() {
   local ip="$1"; shift
   ssh -i "$SSH_KEY" \
@@ -125,6 +127,26 @@ for i in "${!NODE_IPS[@]}"; do
 
   ts_ip=$(node_ssh "$ip" "tailscale ip -4 2>/dev/null" || true)
   info "Tailscale IP: ${ts_ip:-<check admin console>}"
+
+  # k3s's serving cert is issued at install time with only the LAN hostname/IP
+  # as SANs (install-k3s.sh has no way to know the Tailscale IP yet, since
+  # Tailscale isn't installed until this later step) — so kubectl over
+  # Tailscale fails TLS verification unless the server node's Tailscale IP is
+  # added here. Idempotent: only touches config.yaml/restarts k3s if the IP
+  # isn't already present.
+  if [[ "$i" -eq $((SERVER_IDX - 1)) && -n "$ts_ip" ]]; then
+    if ! node_ssh "$ip" "sudo test -f /etc/rancher/k3s/config.yaml && grep -q '${ts_ip}' /etc/rancher/k3s/config.yaml" 2>/dev/null; then
+      info "Adding Tailscale IP as a k3s TLS SAN on ${name} (server node)…"
+      node_ssh "$ip" "sudo mkdir -p /etc/rancher/k3s && \
+        if sudo test -f /etc/rancher/k3s/config.yaml && sudo grep -q '^tls-san:' /etc/rancher/k3s/config.yaml; then \
+          echo '  - ${ts_ip}' | sudo tee -a /etc/rancher/k3s/config.yaml >/dev/null; \
+        else \
+          { echo 'tls-san:'; echo '  - ${ts_ip}'; } | sudo tee -a /etc/rancher/k3s/config.yaml >/dev/null; \
+        fi && \
+        sudo systemctl restart k3s"
+      info "k3s restarted; API server cert now covers ${ts_ip}"
+    fi
+  fi
 done
 
 say "Done. Verify at https://login.tailscale.com/admin/machines"

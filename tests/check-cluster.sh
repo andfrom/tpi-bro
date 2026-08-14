@@ -279,6 +279,53 @@ else
     "no nodes with tpi-bro/npu label — run scripts/label-node-capabilities.sh"
 fi
 
+# ── C16: PriorityClasses (D-00) ───────────────────────────────────────────────
+
+echo ""
+echo "Resource policy (D-00)"
+
+pc_count=$(kubectl get priorityclass interactive background --no-headers 2>/dev/null | wc -l | tr -d ' ')
+if [[ "$pc_count" -eq 2 ]]; then
+  pass "C16 priorityclasses (interactive + background present)"
+else
+  fail "C16 priorityclasses" \
+    "expected 2 (interactive, background), found ${pc_count} — run scripts/apply-resource-policy.sh"
+fi
+
+# ── C17: Tailscale mesh (N-01) ─────────────────────────────────────────────────
+
+echo ""
+echo "Tailscale mesh (N-01)"
+
+ts_operator_ready=$(kubectl get deployment operator -n tailscale \
+  -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "")
+if [[ "$ts_operator_ready" -ge 1 ]] 2>/dev/null; then
+  pass "C17 tailscale-operator (Layer 3 deployment ready)"
+else
+  fail "C17 tailscale-operator" \
+    "operator deployment not ready in namespace tailscale — run scripts/setup-tailscale-operator.sh"
+fi
+
+if command -v tailscale &>/dev/null; then
+  ts_online=0
+  ts_status=$(tailscale status 2>/dev/null)
+  for i in $(seq 1 "$NODE_COUNT"); do
+    node="rk1-node${i}"
+    node_line=$(grep -E "[[:space:]]${node}[[:space:]]" <<<"$ts_status")
+    if [[ -n "$node_line" ]] && ! grep -q "offline" <<<"$node_line"; then
+      ((ts_online++))
+    fi
+  done
+  if [[ "$ts_online" -eq "$NODE_COUNT" ]]; then
+    pass "C18 tailscale-node-mesh (${ts_online}/${NODE_COUNT} nodes online)"
+  else
+    fail "C18 tailscale-node-mesh" \
+      "${ts_online}/${NODE_COUNT} nodes online — run scripts/install-tailscale.sh"
+  fi
+else
+  skip "C18 tailscale-node-mesh" "tailscale CLI not found on this machine"
+fi
+
 # ── summary ───────────────────────────────────────────────────────────────────
 
 echo ""

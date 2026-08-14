@@ -22,11 +22,8 @@ documented here rather than baked into any one application's tooling.
 # Register the QEMU ARM64 binfmt handler (survives until reboot; re-run after)
 docker run --privileged --rm tonistiigi/binfmt --install arm64
 
-# Create a docker-container buildx builder (one-time; --driver-opt network=host
-# avoids DNS resolution failures from a builder container inheriting a stale
-# DNS server baked in at creation time)
-docker buildx create --name tpi-bro-builder --driver docker-container \
-  --driver-opt network=host --bootstrap
+# Create (or reuse) the docker-container buildx builder — idempotent
+./scripts/ensure-buildx-builder.sh
 ```
 
 ## Build and push your image
