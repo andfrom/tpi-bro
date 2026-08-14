@@ -1,6 +1,6 @@
 # tpi-bro — Roadmap
 
-_Last updated: 2026-06-16 (RKNN NPU inference validated on node1; NPU-MODELS.md + ADR-0023 added)_
+_Last updated: 2026-08-14 (Phase B + N-01 Tailscale mesh rebuilt from scratch after a fresh-run test reflashed the nodes; B-04 GitOps done; D-01/D-02 intentionally not redeployed — see note below)_
 
 ## Summary
 
@@ -35,7 +35,7 @@ tpi-bro bootstraps a TuringPi 2 board (4× RK1 ARM64 compute modules) from bare 
 
 ## Phase B — k3s + Persistent Registry
 
-**Overall: B0–B9 COMPLETE; D-01 (Ollama) + D-02 (Agent A) DONE**
+**Overall: B0–B9 + B4-gitops COMPLETE. D-01/D-02 were done 2026-05-11 but are not currently deployed** — see note under the table.
 
 Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Expect script's job ends at A7.
 
@@ -43,7 +43,7 @@ Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Ex
 |------|------|--------|--------|
 | B0-static-ips | Static IPs on BMC + all nodes; netplan on Ubuntu, ifupdown on BMC | `setup-static-ips.sh` | **Done** 2026-05-09 |
 | B0-ssh | SSH key auth + passwordless sudo on all nodes | `setup-ssh-keys.sh` | **Done** 2026-05-09 |
-| B1-k3s | k3s v1.35.4+k3s1 server on node1 + agents on nodes 2–4 | `install-k3s.sh` | **Done** 2026-05-09 |
+| B1-k3s | k3s server on node1 + agents on nodes 2–4 | `install-k3s.sh` | **Done** 2026-05-09; rebuilt 2026-08-14 (v1.36.3+k3s1) |
 | B1-kubeconfig | Laptop kubeconfig at `~/.kube/config` | `install-k3s.sh --kubeconfig` | **Done** 2026-05-09 |
 | B2-certs | TLS cert + self-signed CA (SAN: hostname + static IP) | `gen-registry-certs.sh` (via `setup-registry.sh`) | **Done** 2026-05-11 |
 | B2-registry | Helm chart deployed; HostPort 5000 on node1; PVC local-path 50Gi | `setup-registry.sh` | **Done** 2026-05-11 |
@@ -52,11 +52,13 @@ Phase B is entirely shell scripts + Helm/GitOps — **no Expect stages**. The Ex
 | B2-verify | `docker push` + `docker pull` from laptop verified end-to-end | `setup-registry.sh --verify` | **Done** 2026-05-11 |
 | B2-auth | Registry basic auth (`auth.enabled=true` + htpasswd Secret from `~/.turingpi/credentials.kv`) | `setup-registry.sh --enable-auth` | **Done** 2026-05-11 |
 | B2-pod-pull | k3s pod on rk1-node3 pulled `rk1-node1:5000/test:latest` in 505ms via containerd mirror | `kubectl run test-pull …` | **Done** 2026-05-11 |
-| B3-ssd | Mount NVMe SSD on nodes 1–3; `local-ssd` StorageClass; registry PVC migrated to SSD | `mount-ssd.sh` + `setup-registry.sh --migrate-pvc` | **Done** 2026-05-11 |
-| B4-gitops | Argo CD or Flux install + platform repo structure | — | Not started |
+| B3-ssd | Mount NVMe SSD on nodes 1–3; `local-ssd` StorageClass; registry PVC migrated to SSD | `mount-ssd.sh` + `setup-registry.sh --migrate-pvc` | **Done** 2026-05-11; rebuilt 2026-08-14 |
+| B4-gitops | Flux install + `gitops/` platform repo structure; syncs via a read-only deploy key | `flux install` (no dedicated script yet) | **Done** 2026-08-14 |
 | B5-metallb | MetalLB for stable registry VIP | — | Not started |
-| D-01-ollama | Ollama on each NVMe node; one release per node; 200Gi PVC local-ssd | `install-ollama.sh` | **Done** 2026-05-11 |
-| D-02-agent-a | `sibling-app`'s Agent A Deployment in namespace `sibling-app`; ClusterIP on 18090; arm64 cross-build via QEMU | `sibling-app`'s own `Makefile` (`make build-push && make deploy`); see [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern | **Done** 2026-05-11 |
+| D-01-ollama | Ollama on each NVMe node; one release per node; 200Gi PVC local-ssd | `install-ollama.sh` | Done 2026-05-11; **not currently deployed** (see note below) |
+| D-02-agent-a | `sibling-app`'s Agent A Deployment in namespace `sibling-app`; ClusterIP on 18090; arm64 cross-build via QEMU | `sibling-app`'s own `Makefile` (`make build-push && make deploy`); see [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern | Done 2026-05-11; **not currently deployed** (see note below) |
+
+> **2026-08-14 note:** A fresh-run Phase A test reflashed all 4 nodes, wiping everything from Phase B onward. B0 through B4-gitops were rebuilt the same day. D-01 (Ollama) and D-02 (Agent A) were **deliberately not redeployed** — sibling-app's agents are not meant to run on this cluster, so their "Done" dates above reflect the original 2026-05-11 work, not current state.
 
 ### Running Phase B (orchestrated)
 
@@ -123,7 +125,7 @@ Exit 0 only if all enabled checks pass.
 
 ## Phase D — Multi-Agent Workloads
 
-**Overall: D-01 + D-02 DONE**
+**Overall: D-01 + D-02 were built 2026-05-11 but are not currently deployed — sibling-app's agents are intentionally kept off this cluster (see note in the Phase B table).** D-04 (monitoring) is also not currently deployed.
 
 ---
 

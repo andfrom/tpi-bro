@@ -3,7 +3,7 @@
 The single source of truth for current hardware, access methods, and credentials
 format. For phase-by-phase progress and what's next, see [ROADMAP.md](ROADMAP.md).
 
-_Last updated: 2026-06-16 (RKNN NPU inference validated; NPU section added)_
+_Last updated: 2026-08-14 (Phase B + Tailscale mesh rebuilt from scratch after a fresh-run Phase A test reflashed the nodes; B-04 GitOps added; D-01/D-02/D-04 not currently deployed — see Software Stack table)_
 
 ## Cluster Hardware
 
@@ -35,16 +35,16 @@ _Last updated: 2026-06-16 (RKNN NPU inference validated; NPU section added)_
 | OS | Ubuntu 24.04.1 LTS ARM64 (joshua-riek/ubuntu-rockchip v2.4.0) | Deployed on all 4 nodes (2026-05-10) |
 | Container runtime (Phase A) | Docker (node1 only, for Phase A registry) | Stopped (Phase B registry replaced it) |
 | Container runtime (Phase B) | containerd 2.2.3 (via k3s) | Running on all 4 nodes |
-| Orchestrator | k3s v1.35.4+k3s1 | Running (node1 server, nodes 2–4 agents) |
-| GitOps | Argo CD or Flux (TBD) | Not installed |
+| Orchestrator | k3s v1.36.3+k3s1 | Running (node1 server, nodes 2–4 agents); rebuilt 2026-08-14 |
+| GitOps | Flux v2.9.4 | **Running**; syncing `gitops/` from GitHub via a read-only deploy key (B-04, done 2026-08-14) |
 | Registry (Phase A) | registry:2 container, HTTP, port 5000 | Stopped (replaced by Phase B) |
-| Registry (Phase B) | Helm chart (`charts/registry/`), TLS + basic auth | **Running** on node1 (HostPort 5000, PVC 50Gi local-ssd) |
-| Storage | `local-ssd` StorageClass (rancher.io/local-path-ssd, WaitForFirstConsumer) | **Running** in kube-system; scoped to nodes 1–3 (NVMe only) |
-| LLM runtime | Ollama (`charts/ollama/`); one Deployment per NVMe node; 200Gi PVC `local-ssd` | **Running**; `llama3.2:3b` pulled on ollama-node1; namespace `ollama` |
-| Agent | `sibling-app`'s Agent A; FastAPI on port 18090; `OLLAMA_URL=http://ollama-node1.ollama:11434` | **Deployed**; namespace `sibling-app`; built/deployed via `sibling-app`'s own `Makefile` (`make build-push && make deploy`) — see [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern |
-| Network mesh | Tailscale 1.96.4; all 4 nodes + laptop on Tailnet; subnet routes `10.42.0.0/16` + `10.43.0.0/16` advertised via node1 | **Running** — all 3 layers done; `agent-a` exposed on Tailnet |
+| Registry (Phase B) | Helm chart (`charts/registry/`), TLS + basic auth | **Running** on node1 (HostPort 5000, PVC 50Gi local-ssd); rebuilt 2026-08-14 |
+| Storage | `local-ssd` StorageClass (rancher.io/local-path-ssd, WaitForFirstConsumer) | **Running** in kube-system; scoped to nodes 1–3 (NVMe only); rebuilt 2026-08-14 |
+| LLM runtime | Ollama (`charts/ollama/`); one Deployment per NVMe node; 200Gi PVC `local-ssd` | **Not deployed** — built 2026-05-11, wiped by the 2026-08-13 reflash, not redeployed |
+| Agent | `sibling-app`'s Agent A; FastAPI on port 18090 | **Not deployed** — sibling-app's agents are intentionally kept off this cluster; the 2026-05-11 deployment was wiped by the 2026-08-13 reflash and not redeployed. See [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern if this changes |
+| Network mesh | Tailscale 1.102.2; all 4 nodes + laptop on Tailnet; subnet routes `10.42.0.0/16` + `10.43.0.0/16` advertised via node1 | **Running** — all 3 layers rebuilt 2026-08-14 after the reflash wiped the previous mesh state |
 | Ingress | Traefik (k3s built-in) | Running (k3s default); superseded by Tailscale operator for service exposure |
-| Observability | kube-prometheus-stack (Prometheus + Grafana + Alertmanager + node-exporter + kube-state-metrics); `charts/monitoring/values.yaml` | **Running**; namespace `monitoring`; Grafana on Tailnet |
+| Observability | kube-prometheus-stack (Prometheus + Grafana + Alertmanager + node-exporter + kube-state-metrics); `charts/monitoring/values.yaml` | **Not deployed** — built 2026-05-11, wiped by the 2026-08-13 reflash, not redeployed |
 | NPU inference | `rknn-toolkit-lite2` + `librknnrt.so` 2.3.2; Whisper medium encoder+decoder; `tagx/whisper-stt:rknn` image | **Validated** on node1 (2026-06-16); `--privileged`; models at `/mnt/ssd/whisper-models/rknn/`; no KV-cache decoder yet (W-03) |
 
 ## Access Methods
@@ -72,9 +72,11 @@ Check live IPs with `tailscale status` or at <https://login.tailscale.com/admin/
 
 Subnet routes `10.42.0.0/16` (pods) and `10.43.0.0/16` (services) advertised by node1 and approved in Tailscale admin. Laptop runs `tailscale up --accept-routes`. All ClusterIP services are directly routable from the laptop — no port-forwarding required.
 
-Layer 3 (Tailscale Kubernetes operator) deployed in namespace `tailscale`. `agent-a` exposed as `sibling-app-agent-a.<tailnet>.ts.net:18090` (operator names devices as `<namespace>-<service>`). Add more services with `./scripts/setup-tailscale-operator.sh --expose svc/NAME -n NAMESPACE`.
+Layer 3 (Tailscale Kubernetes operator) deployed in namespace `tailscale` (rebuilt 2026-08-14). No services are currently exposed through it — Agent A and monitoring, the two previous consumers, aren't deployed right now (see Software Stack table). Add a service with `./scripts/setup-tailscale-operator.sh --expose svc/NAME -n NAMESPACE`; the operator names devices as `<namespace>-<service>`.
 
 ## Observability (D-04)
+
+**Not currently deployed.** Built 2026-05-11, wiped by the 2026-08-13 reflash, not redeployed as of 2026-08-14 — kept out of scope for the same reason as D-01/D-02 (rebuild focused on B0–B4-gitops + Tailscale only). The table below describes how it worked when it was last deployed, as a reference for redeploying it.
 
 | Component | URL | Notes |
 |-----------|-----|-------|
@@ -175,4 +177,4 @@ Registry PVC `registry-data` is on `local-ssd` (node1, co-located with HostPort 
 - `turingpi.local` mDNS resolution can fail when only WiFi is available on some networks; fall back to using the static IP `192.168.1.10` directly
 - Ubuntu 24.04.1 LTS enforces a mandatory password change on first boot; the bootstrap script handles this automatically via `unlock_expired_password`
 - BMC's `nmap`-based auto-detection (A1) depends on reverse-DNS resolving the literal hostname "turingpi," which most networks don't provide — expect the manual IP-entry fallback to be the normal path, not a corner case
-- Accumulated cluster cruft as of 2026-08-13, not yet cleaned up: ~26 dead pods in the `registry` namespace from an old crash-looping ReplicaSet; Grafana crash-looping on a PVC permission mismatch (`init-chown-data` gets `Permission denied`); `sibling-app/ingest` CronJob stuck in `ImagePullBackOff` for an image that was never pushed; an orphaned 9GB `tagx/whisper-stt:rknn` image sitting in node1's legacy Docker store, never pushed to the registry
+- ~~Accumulated cluster cruft as of 2026-08-13~~ — moot as of 2026-08-14: a fresh-run Phase A test reflashed all 4 nodes, which wiped the cluster (and this cruft) entirely. Phase B, GitOps, and the Tailscale mesh were rebuilt from scratch the same day; see the "Last updated" note at the top of this file
