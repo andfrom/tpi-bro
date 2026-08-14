@@ -121,13 +121,13 @@ Validated end-to-end on real hardware, 2026-08-14:
 | **24-layer (full) shim vs reference** | **cosine 0.999951, top-5 tokens identical** |
 | 24-layer shim, real speech, full driver (`infer_rknn_sa_kv.py --shim`) | transcript: **"The quick brown fox jumps over the lazy dog."** — correct |
 
-Decode speed with the shim: ~2,028 ms/step (FP32 host feeds), vs ~5,009
-ms/step for the chart's current full-recompute decoder — **~2.5× measured**,
-before the documented FP16-input-feed optimization (projected ~1.5× more) is
-applied. The working artifact is preserved on node1 at
-`/mnt/ssd/whisper-models/rknn/medium/whisper_decoder_sa_kv_step_shim_medium.rknn`
-(debug-pipeline build; the canonical `export_onnx.py`/`convert_rknn.py`
-shim mode is the remaining productionization step).
+Decode speed with the shim: ~2,028 ms/step (FP32 host feeds; ~1,834 ms/step
+with `--fp16-feeds`), vs ~5,009 ms/step for the naive full-recompute
+decoder — **~2.5× measured**. The canonical artifact (built by the
+productionized `export_onnx.py`/`convert_rknn.py` shim pipeline, same graph)
+lives on node1 at
+`/mnt/ssd/whisper-models/rknn/medium/whisper_decoder_sa_kv_step_medium.rknn`,
+replacing the broken 4D build.
 
 ## Minimal upstream repro
 
@@ -152,9 +152,16 @@ loss, no maintainer response).
 
 ## Status
 
-**W-03 unblocked.** The full-depth SA-KV decoder produces correct
-transcripts on real hardware using the shim. Remaining productionization
-(tracked in `backlog/BACKLOG.md` W-03): move the shim into the canonical
-export/convert pipeline, re-export/deploy the production model set, wire the
-`--shim` driver path into `charts/whisper/`, then apply and *re-verify with
-the fingerprint tool* the FP16-input-feed optimization.
+**W-03 fixed and productionized (2026-08-14).** The shim is the canonical
+export form (`_DecoderSAKVStepShim` in tagx `export_onnx.py`;
+`convert_rknn.py` updated to match); a canonical re-export/convert was
+deployed to node1 as `whisper_decoder_sa_kv_step_medium.rknn` (replacing
+the broken 4D artifact) and validated on hardware — cosine 0.999951,
+fingerprint "caches DELIVERED", correct real-audio transcript through both
+the bare driver and a full `charts/whisper/` Kubernetes Job
+(`rknn.decoder: sa-kv`). FP16 input feeds (`--fp16-feeds`) were also
+fingerprint-verified: measured ~1.10× (2,027 → 1,834 ms/step), notably
+below the ~1.5× projected in tagx's live-transcription notes — that
+projection came from a deleted script and does not reproduce through
+`rknnlite.inference()`; a real 1.5× likely requires the zero-copy
+pass-through C-API path.

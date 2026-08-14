@@ -228,28 +228,34 @@ tagx's ADR-0008 lands.
 
 ### W-03: Self-attention KV cache for RKNN Whisper decoder
 
-**Status:** UNBLOCKED — root-caused and fixed 2026-08-14 (second-pass
-investigation). The failure was never a silicon/scale limit: librknnrt
-2.3.2 silently never delivers NC1HWC2-native-layout graph inputs on real
-RK3588, at any model size (the earlier "breaks beyond ~18 layers" theory
-was an artifact of an underpowered test — see the "false trail" section of
-`docs/RKNN-SA-KV-DECODER-BUG.md`). The "input shim" (3D cache inputs,
-unsqueezed in-model so they enter in linear layout) routes around it
-entirely: full 24-layer decoder validated on real hardware, correct
-transcript, ~2,028 ms/step vs ~5,009 ms/step naive (~2.5× measured).
-Working artifact: node1
-`/mnt/ssd/whisper-models/rknn/medium/whisper_decoder_sa_kv_step_shim_medium.rknn`.
+**Status:** DONE except final measurement polish — root-caused, fixed, and
+productionized 2026-08-14. The failure was never a silicon/scale limit:
+librknnrt 2.3.2 silently never delivers NC1HWC2-native-layout graph inputs
+on real RK3588, at any model size. The "input shim" (3D cache inputs,
+unsqueezed in-model so they enter in linear layout) routes around it — full
+story in `docs/RKNN-SA-KV-DECODER-BUG.md`.
 
-**Remaining productionization:**
-1. Promote `_DecoderSAKVStepShim` from tagx `debug/` into the canonical
-   `export_onnx.py`/`convert_rknn.py` sa-kv mode; re-export and deploy the
-   production model set.
-2. Wire `infer_rknn_sa_kv.py --shim` into `charts/whisper/` (new decoder
-   env/entrypoint variant).
-3. Apply the FP16-input-feed optimization (projected ~1.5× further, →
-   ~1.3 s/step) and re-verify correctness with
-   `debug/fingerprint_cache_delivery.py` — never with a bare
-   cosine-vs-reference check.
+Productionized same day:
+- Shim is the canonical export (`_DecoderSAKVStepShim` in tagx
+  `export_onnx.py`; `convert_rknn.py` shapes updated); canonical
+  re-export/convert deployed to node1
+  (`whisper_decoder_sa_kv_step_medium.rknn`, replacing the broken 4D
+  artifact) and validated on hardware (cosine 0.999951 + fingerprint
+  "caches DELIVERED" + correct real-audio transcript).
+- `charts/whisper/` gained `rknn.decoder: sa-kv` (command override to
+  `infer_rknn_sa_kv.py`, XA-KV/SA-KV env wiring, `WHISPER_SA_KV_SHIM=1`);
+  the `tagx/whisper-stt:rknn` image now ships the SA-KV driver.
+- FP16 input feeds implemented (`--fp16-feeds`) and fingerprint-verified:
+  measured **~1.10×** (2,027 → 1,834 ms/step) — NOT the ~1.5× projected by
+  tagx's live-transcription notes (that number came from a deleted script
+  and doesn't reproduce through `rknnlite.inference()`; a genuine 1.5×
+  likely needs the zero-copy/pass-through C-API path). Default off; enable
+  per-run with the flag or `WHISPER_SA_KV_FP16_FEEDS=1`.
+
+Bottom line: SA-KV decode is ~2.5× the naive decoder (2.0 s/step vs
+5.0 s/step, medium; ~1.8 s/step with fp16 feeds). Remaining ideas beyond
+this (zero-copy I/O, smaller live-tier models) belong to tagx's
+live-transcription program, not this repo.
 
 ---
 

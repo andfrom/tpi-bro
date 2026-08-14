@@ -7,6 +7,9 @@
 {{- if and .Values.rknn.enabled (eq .Values.language "auto") }}
 {{- fail "language: auto is not supported with rknn.enabled — the RKNN decoder is a fixed-shape greedy loop that needs the language token fixed before decoding starts (see images/whisper-stt/rknn/infer_rknn.py); there is no auto-detection pass like the CPU/faster-whisper path has. Set language to an explicit code (e.g. \"en\")." }}
 {{- end }}
+{{- if and .Values.rknn.enabled (not (has .Values.rknn.decoder (list "naive" "sa-kv"))) }}
+{{- fail "rknn.decoder must be \"naive\" or \"sa-kv\"." }}
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -37,7 +40,14 @@ spec:
         - name: whisper
           image: "{{ .Values.image.repository }}:{{ if .Values.rknn.enabled }}rknn{{ else }}{{ .Values.image.tag }}{{ end }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # Both variants take the audio path as a --audio CLI arg (see
+          {{- if and .Values.rknn.enabled (eq .Values.rknn.decoder "sa-kv") }}
+          # SA-KV decoder (W-03): ~2.5x faster than the naive full-recompute
+          # decoder. The image ENTRYPOINT stays the naive driver; this
+          # override selects the SA-KV one. Requires the shim-exported
+          # decoder model in the model cache (see RKNN-SA-KV-DECODER-BUG.md).
+          command: ["python", "/app/infer_rknn_sa_kv.py"]
+          {{- end }}
+          # All variants take the audio path as a --audio CLI arg (see
           # Dockerfile.rknn and images/whisper-stt/app/whisper_stt.py).
           args:
             - --audio
@@ -60,8 +70,19 @@ spec:
             # to match whichever model this release requests.
             - name: WHISPER_ENCODER
               value: "{{ .Values.modelCache.mountPath }}/whisper_encoder_{{ .Values.model }}.rknn"
+            {{- if eq .Values.rknn.decoder "sa-kv" }}
+            - name: WHISPER_XA_KV_ENCODER
+              value: "{{ .Values.modelCache.mountPath }}/whisper_xa_kv_encoder_{{ .Values.model }}.rknn"
+            - name: WHISPER_DECODER_SA_KV
+              value: "{{ .Values.modelCache.mountPath }}/whisper_decoder_sa_kv_step_{{ .Values.model }}.rknn"
+            # Shim-input decoder is the canonical export; a 4D-input decoder
+            # is known-broken on real hardware (cache inputs silently zeroed).
+            - name: WHISPER_SA_KV_SHIM
+              value: "1"
+            {{- else }}
             - name: WHISPER_DECODER
               value: "{{ .Values.modelCache.mountPath }}/whisper_decoder_{{ .Values.model }}.rknn"
+            {{- end }}
             {{- end }}
           volumeMounts:
             - name: model-cache

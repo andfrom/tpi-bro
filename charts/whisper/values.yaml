@@ -1,6 +1,9 @@
 image:
   repository: rk1-node1:5000/tagx/whisper-stt
   tag: latest
+  # NOTE: the :rknn tag is mutable — after pushing a rebuilt rknn image, a
+  # node's containerd cache will keep serving the old one under
+  # IfNotPresent. Set pullPolicy=Always for the first run after a push.
   pullPolicy: IfNotPresent
 
 # Whisper model size (e.g. large-v3, medium). Passed through as WHISPER_MODEL.
@@ -40,6 +43,15 @@ rknn:
   enabled: false
   privileged: true
   devices: []
+  # Decoder variant:
+  #   naive  — full-recompute decoder (infer_rknn.py); slow (~5 s/token,
+  #            medium) but needs only encoder + decoder models.
+  #   sa-kv  — self-attention KV-cache decoder (infer_rknn_sa_kv.py);
+  #            ~2.5x faster (~2 s/token, medium). Requires the xa_kv_encoder
+  #            and the SHIM-exported sa_kv_step decoder in the model cache —
+  #            a 4D-input sa_kv decoder silently produces wrong transcripts
+  #            on real hardware (see docs/RKNN-SA-KV-DECODER-BUG.md).
+  decoder: naive
 
 priorityClassName: background
 
