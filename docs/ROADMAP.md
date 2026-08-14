@@ -80,7 +80,11 @@ Not started (blocked on Phase B). See `backlog/BACKLOG.md` (C-01 through C-03).
 
 ## Phase D — Multi-Agent Workloads
 
-Ollama, Agent A, and monitoring are not currently deployed — sibling-app's agents are intentionally kept off this cluster, and monitoring hasn't been redeployed alongside them. See `docs/OPERATIONS.md` for the reasoning and current state.
+Ollama (D-01) and monitoring (D-04) are running, redeployed 2026-08-14 after
+the Phase A reflash wiped the original 2026-05-11 deployment. Agent
+workloads (D-02) are intentionally not deployed — sibling-app's agents are kept
+off this cluster; see `docs/OPERATIONS.md` for the reasoning and current
+state.
 
 ## NPU / Whisper
 

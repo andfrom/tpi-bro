@@ -219,7 +219,7 @@ Everything after bootstrap is handled declaratively via Kubernetes manifests and
 
 **Phase C:** Local registry mirror + sync from laptop, IP resilience (static DHCP or CoreDNS), cloud expansion notes. Not started.
 
-**Phase D:** Multi-agent workloads, Ollama per node, observability. **D-01 (Ollama) + D-02 (Agent A) + D-04 (Prometheus + Grafana) complete.** RKNN NPU inference validated on node1 — Whisper `medium` STT container images built and benchmarked, 2026-06-16. Next: KV-cache decoder (W-03), GitOps (B-04), MetalLB (B-05).
+**Phase D:** Multi-agent workloads, Ollama per node, observability. **D-01 (Ollama) + D-04 (Prometheus + Grafana) complete.** (Agent workloads are consumer-owned — this repo doesn't ship or deploy any itself.) RKNN NPU inference validated on node1 — Whisper `medium` STT container images built and benchmarked, 2026-06-16; end-to-end chart validated on hardware (both CPU and RKNN paths), 2026-08-14. GitOps (B-04) complete. Next: KV-cache decoder (W-03), MetalLB (B-05).
 
 Recommended workflow:
 1. Build & push images from CI/CD into the cluster-local registry
@@ -291,7 +291,7 @@ Supporting services (API gateway, vector DB, queue, metrics) are stateless or di
 | Argo CD / Flux | GitOps controller — reconcile cluster to Git state continuously |
 | Ollama | LLM inference runtime on each agent node |
 | Traefik | Ingress (bundled with k3s) |
-| Prometheus + Grafana | Observability — deployed (D-04, 2026-05-11); Grafana on Tailnet |
+| Prometheus + Grafana | Observability — Grafana exposed on Tailnet |
 
 ---
 

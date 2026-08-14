@@ -3,7 +3,7 @@
 The single source of truth for current hardware, access methods, and credentials
 format. For phase-by-phase progress and what's next, see [ROADMAP.md](ROADMAP.md).
 
-_Last updated: 2026-08-14 (Phase B + Tailscale mesh rebuilt from scratch after a fresh-run Phase A test reflashed the nodes; B-04 GitOps added; D-01/D-02/D-04 not currently deployed — see Software Stack table)_
+_Last updated: 2026-08-14 (Phase B + Tailscale mesh rebuilt from scratch after a fresh-run Phase A test reflashed the nodes; B-04 GitOps added; D-01 (Ollama) and D-04 (Prometheus+Grafana) redeployed same day; D-02 (Agent A) intentionally not redeployed — see Software Stack table)_
 
 ## Cluster Hardware
 
@@ -40,11 +40,11 @@ _Last updated: 2026-08-14 (Phase B + Tailscale mesh rebuilt from scratch after a
 | Registry (Phase A) | registry:2 container, HTTP, port 5000 | Stopped (replaced by Phase B) |
 | Registry (Phase B) | Helm chart (`charts/registry/`), TLS + basic auth | **Running** on node1 (HostPort 5000, PVC 50Gi local-ssd); rebuilt 2026-08-14 |
 | Storage | `local-ssd` StorageClass (rancher.io/local-path-ssd, WaitForFirstConsumer) | **Running** in kube-system; scoped to nodes 1–3 (NVMe only); rebuilt 2026-08-14 |
-| LLM runtime | Ollama (`charts/ollama/`); one Deployment per NVMe node; 200Gi PVC `local-ssd` | **Not deployed** — built 2026-05-11, wiped by the 2026-08-13 reflash, not redeployed |
+| LLM runtime | Ollama (`charts/ollama/`); one Deployment per NVMe node; 200Gi PVC `local-ssd` | **Running** on nodes 1–3, `llama3.2:1b` loaded on each; redeployed 2026-08-14 after the 2026-08-13 reflash wiped the original 2026-05-11 deployment |
 | Agent | `sibling-app`'s Agent A; FastAPI on port 18090 | **Not deployed** — sibling-app's agents are intentionally kept off this cluster; the 2026-05-11 deployment was wiped by the 2026-08-13 reflash and not redeployed. See [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern if this changes |
 | Network mesh | Tailscale 1.102.2; all 4 nodes + laptop on Tailnet; subnet routes `10.42.0.0/16` + `10.43.0.0/16` advertised via node1 | **Running** — all 3 layers rebuilt 2026-08-14 after the reflash wiped the previous mesh state |
 | Ingress | Traefik (k3s built-in) | Running (k3s default); superseded by Tailscale operator for service exposure |
-| Observability | kube-prometheus-stack (Prometheus + Grafana + Alertmanager + node-exporter + kube-state-metrics); `charts/monitoring/values.yaml` | **Not deployed** — built 2026-05-11, wiped by the 2026-08-13 reflash, not redeployed |
+| Observability | kube-prometheus-stack (Prometheus + Grafana + Alertmanager + node-exporter + kube-state-metrics); `charts/monitoring/values.yaml` | **Running** in `monitoring` namespace; Grafana exposed on Tailnet; redeployed 2026-08-14 after the 2026-08-13 reflash wiped the original 2026-05-11 deployment |
 | NPU inference | `rknn-toolkit-lite2` + `librknnrt.so` 2.3.2; Whisper medium encoder+decoder; `tagx/whisper-stt:rknn` image | **Validated** on node1 (2026-06-16); `--privileged`; models at `/mnt/ssd/whisper-models/rknn/`; no KV-cache decoder yet (W-03) |
 
 ## Access Methods
