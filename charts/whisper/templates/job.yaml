@@ -34,11 +34,12 @@ spec:
         - name: whisper
           image: "{{ .Values.image.repository }}:{{ if .Values.rknn.enabled }}rknn{{ else }}{{ .Values.image.tag }}{{ end }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- if .Values.rknn.enabled }}
-          # RKNN entrypoint takes the audio path as a CLI arg (see Dockerfile.rknn).
+          # Both variants take the audio path as a --audio CLI arg (see
+          # Dockerfile.rknn and images/whisper-stt/app/whisper_stt.py).
           args:
             - --audio
             - "{{ .Values.audio.mountPath }}/{{ .Values.audio.filePath }}"
+          {{- if .Values.rknn.enabled }}
           securityContext:
             privileged: {{ .Values.rknn.privileged }}
           {{- end }}
@@ -58,13 +59,6 @@ spec:
               value: "{{ .Values.modelCache.mountPath }}/whisper_encoder_{{ .Values.model }}.rknn"
             - name: WHISPER_DECODER
               value: "{{ .Values.modelCache.mountPath }}/whisper_decoder_{{ .Values.model }}.rknn"
-            {{- else }}
-            # CPU (faster-whisper) entrypoint's audio-input contract is not yet
-            # defined — images/whisper-stt/app/ doesn't exist in tagx yet. This
-            # assumes an env var consistent with the other WHISPER_* vars the
-            # Dockerfile already sets; confirm/adjust once that app exists.
-            - name: WHISPER_AUDIO_PATH
-              value: "{{ .Values.audio.mountPath }}/{{ .Values.audio.filePath }}"
             {{- end }}
           volumeMounts:
             - name: model-cache

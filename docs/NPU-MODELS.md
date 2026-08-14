@@ -405,6 +405,6 @@ https://github.com/airockchip/rknn-toolkit2/raw/master/rknpu2/runtime/Linux/libr
 
 ## See also
 
-- `backlog/BACKLOG.md` — R-01: RK3588 NPU acceleration research item; W-01/W-02: Whisper STT
+- `backlog/BACKLOG.md` — R-01: RK3588 NPU acceleration research item; W-03: Whisper STT self-attention KV cache
 - `docs/PREREQUISITES.md` — cluster prerequisites before deploying rkllm-server
 - `charts/ollama/` — existing Ollama deployment (CPU-only, stays as fallback)

@@ -123,7 +123,7 @@ image in tagx. The init container:
 
 Requires a ClusterRole with `pods/get`, `pods/list`, `pods/delete` and a
 ServiceAccount bound to it, scoped per namespace. Add to the whisper chart
-(W-01) as the first consumer.
+(`charts/whisper/`) as the first consumer.
 
 ### E-04: Affinity scheduling validation
 
@@ -217,35 +217,14 @@ designing until there's a second schema version to actually negotiate
 between; tagx's ADR-0008 explicitly leaves this open rather than speculating
 on a compatibility-negotiation mechanism neither repo needs yet.
 
-First consumer: W-01/W-02 (Whisper STT), once `images/whisper-stt/app/`
-actually exists in tagx and there's a real CPU tag to attach labels to.
+First consumer: Whisper STT (`charts/whisper/`) — both the CPU and RKNN
+images now exist in tagx's registry (`tagx/whisper-stt:latest`,
+`tagx/whisper-stt:rknn`), so labels have real tags to attach to whenever
+tagx's ADR-0008 lands.
 
 ---
 
 ## Whisper STT
-
-### W-01: Helm chart for batch STT jobs with model cache (CPU)
-
-**Status:** Chart done (`charts/whisper/`), CPU path itself still BLOCKED —
-not on a registry push anymore, but on `images/whisper-stt/app/` not existing
-in tagx at all. The Dockerfile (`COPY app/ /app/`) references a directory
-that was never created — this needs actual application code (a faster-whisper
-wrapper) written in tagx before there's anything to build, let alone push.
-Confirmed by trying: `docker buildx build` fails immediately with
-`"/app": not found`.
-
-One-shot Job (not a Deployment), modelled on `charts/ollama/` but using
-capability-based `nodeAffinity` (`storage.tpi-bro/nvme=true`, plus
-`tpi-bro/npu=rk3588` when `rknn.enabled`) rather than a hard node pin — this
-workload doesn't need a *specific* node the way Ollama's model cache does.
-
-Key chart values:
-- `image.repository` / `image.tag` — caller supplies the tagx image reference
-- `model` — Whisper model size (e.g. `large-v3`)
-- `modelCache` — path inside container where `/models` is mounted (default `/models`)
-- `language`, `beamSize` — passed through as env vars to the container
-- `audio.claimName` / `audio.filePath` — caller-supplied existing PVC + path;
-  tpi-bro provides scheduling/storage only, not the audio itself
 
 ### W-03: Self-attention KV cache for RKNN Whisper decoder
 

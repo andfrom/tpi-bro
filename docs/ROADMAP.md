@@ -84,7 +84,7 @@ Ollama, Agent A, and monitoring are not currently deployed — sibling-app's age
 
 ## NPU / Whisper
 
-Whisper `medium` inference on the RK3588 NPU already works (see `docs/NPU-MODELS.md`, `adr/ADR-0023-rknn-npu-device-access-pattern.md`). Open work is tracked in `backlog/BACKLOG.md` under **Whisper STT** (W-01–W-03) and **NPU Characterization** (NC-01–NC-03) — not duplicated here.
+Whisper `medium` inference on the RK3588 NPU already works (see `docs/NPU-MODELS.md`, `adr/ADR-0023-rknn-npu-device-access-pattern.md`). Open work is tracked in `backlog/BACKLOG.md` under **Whisper STT** (W-03) and **NPU Characterization** (NC-01–NC-03) — not duplicated here.
 
 ---
 

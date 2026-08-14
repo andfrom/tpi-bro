@@ -21,7 +21,7 @@ audio:
   filePath: ""
   mountPath: /audio
 
-# RKNN acceleration (W-02). Disabled by default — the CPU variant deploys
+# RKNN acceleration. Disabled by default — the CPU variant deploys
 # cleanly with rknn.enabled: false. When true, switches to the RKNN image
 # entrypoint and adds NPU device access.
 #
