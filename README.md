@@ -1,3 +1,5 @@
+![tpi-bro logo - stylized TuringPi Mini ITX case](assets/images/tpi-bro-logo.png)
+
 # `tpi-bro` &nbsp; – &nbsp; a Turing Pi 2 Cluster Bootstrap project
 
 > This is a practical, minimal bootstrap to get a [Turing Pi 2](https://turingpi.com/) cluster with 4 [RK1](https://docs.turingpi.com/docs/turing-rk1-specs-and-io-ports) compute modules to a working state fast.
