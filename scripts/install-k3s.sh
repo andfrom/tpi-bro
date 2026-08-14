@@ -79,8 +79,15 @@ NODE_COUNT=$(kv_get NODE_COUNT      "$CONFIG_FILE")
 [[ -n "$NODE_COUNT"  ]] || NODE_COUNT=4
 
 SERVER_NODE="rk1-node${SERVER_IDX}"
+# Real IP value needed for two things: the k3s TLS SAN, and K3S_URL that agent
+# nodes use to join — that runs on each agent's own shell, reaching the server
+# over the local LAN regardless of what network the laptop is on, so it can't
+# be hostname-based (agent nodes don't have our /etc/hosts maintenance).
 SERVER_IP=$(ip_add "$TPI_BASE" "$SERVER_IDX")
 SERVER_URL="https://${SERVER_IP}:6443"
+# Laptop-side only (kubeconfig, SSH) — resolved via /etc/hosts, so it stays
+# correct whether that's currently pointing at a LAN or Tailscale address.
+KUBECONFIG_URL="https://${SERVER_NODE}:6443"
 
 AGENT_NODES=()
 for (( i=1; i<=NODE_COUNT; i++ )); do
@@ -116,7 +123,7 @@ install_server() {
   fi
 
   local already
-  already=$(node_ssh "$SERVER_IP" \
+  already=$(node_ssh "$SERVER_NODE" \
     "systemctl is-active k3s 2>/dev/null || true")
 
   if [[ "$already" == "active" ]]; then
@@ -125,7 +132,7 @@ install_server() {
   fi
 
   info "Running k3s install script (ARM64, may take 2-3 min)…"
-  node_ssh "$SERVER_IP" \
+  node_ssh "$SERVER_NODE" \
     "curl -sfL https://get.k3s.io | sudo sh -s - \
        --node-name ${SERVER_NODE} \
        --write-kubeconfig-mode 644 \
@@ -137,13 +144,13 @@ install_server() {
   deadline=$(( $(date +%s) + 120 ))
   while (( $(date +%s) < deadline )); do
     local st
-    st=$(node_ssh "$SERVER_IP" "systemctl is-active k3s 2>/dev/null || true")
+    st=$(node_ssh "$SERVER_NODE" "systemctl is-active k3s 2>/dev/null || true")
     [[ "$st" == "active" ]] && break
     sleep 5
   done
 
   local st
-  st=$(node_ssh "$SERVER_IP" "systemctl is-active k3s 2>/dev/null || true")
+  st=$(node_ssh "$SERVER_NODE" "systemctl is-active k3s 2>/dev/null || true")
   [[ "$st" == "active" ]] || err "k3s server did not become active within 120s"
   info "k3s server active."
 }
@@ -151,7 +158,7 @@ install_server() {
 # ---- get node token ---------------------------------------------------------
 
 get_token() {
-  node_ssh "$SERVER_IP" \
+  node_ssh "$SERVER_NODE" \
     "sudo cat /var/lib/rancher/k3s/server/node-token"
 }
 
@@ -166,14 +173,10 @@ install_agents() {
   fi
 
   for node in "${AGENT_NODES[@]}"; do
-    local idx="${node##*-node}"
-    local ip
-    ip=$(ip_add "$TPI_BASE" "$idx")
-
-    say "Installing k3s agent on $node ($ip)…"
+    say "Installing k3s agent on $node…"
 
     local already
-    already=$(node_ssh "$ip" \
+    already=$(node_ssh "$node" \
       "systemctl is-active k3s-agent 2>/dev/null || true")
 
     if [[ "$already" == "active" ]]; then
@@ -181,7 +184,9 @@ install_agents() {
       continue
     fi
 
-    node_ssh "$ip" \
+    # K3S_URL runs on the agent's own shell, reaching the server over the
+    # local LAN — must stay IP-based (see SERVER_IP/SERVER_URL comment above).
+    node_ssh "$node" \
       "curl -sfL https://get.k3s.io | \
          K3S_URL=${SERVER_URL} \
          K3S_TOKEN=${token} \
@@ -206,7 +211,7 @@ wait_nodes_ready() {
   deadline=$(( $(date +%s) + 300 ))
   while (( $(date +%s) < deadline )); do
     local ready
-    ready=$(node_ssh "$SERVER_IP" \
+    ready=$(node_ssh "$SERVER_NODE" \
       "sudo kubectl get nodes --no-headers 2>/dev/null | grep -c ' Ready'" || echo 0)
     info "Ready: $ready / $NODE_COUNT"
     (( ready >= NODE_COUNT )) && break
@@ -214,7 +219,7 @@ wait_nodes_ready() {
   done
 
   local ready
-  ready=$(node_ssh "$SERVER_IP" \
+  ready=$(node_ssh "$SERVER_NODE" \
     "sudo kubectl get nodes --no-headers 2>/dev/null | grep -c ' Ready'" || echo 0)
   if (( ready < NODE_COUNT )); then
     echo "  WARN: only $ready/$NODE_COUNT nodes Ready after 5 min — continuing anyway."
@@ -229,7 +234,7 @@ setup_kubeconfig() {
 
   if (( DRY )); then
     info "[dry-run] Would fetch /etc/rancher/k3s/k3s.yaml from $SERVER_NODE"
-    info "[dry-run] Would write ~/.kube/config (server: ${SERVER_URL})"
+    info "[dry-run] Would write ~/.kube/config (server: ${KUBECONFIG_URL})"
     return 0
   fi
 
@@ -237,12 +242,15 @@ setup_kubeconfig() {
   [[ -f ~/.kube/config ]] && cp ~/.kube/config ~/.kube/config.bak \
     && info "Existing config backed up to ~/.kube/config.bak"
 
-  node_ssh "$SERVER_IP" "cat /etc/rancher/k3s/k3s.yaml" \
-    | sed "s|https://127.0.0.1:6443|${SERVER_URL}|g" \
-    | sed "s|https://localhost:6443|${SERVER_URL}|g" \
+  # Hostname-based, not SERVER_IP — stays correct across network changes since
+  # it's resolved via /etc/hosts (LAN or Tailscale) at connection time, rather
+  # than baking in whichever address happened to be current at install time.
+  node_ssh "$SERVER_NODE" "cat /etc/rancher/k3s/k3s.yaml" \
+    | sed "s|https://127.0.0.1:6443|${KUBECONFIG_URL}|g" \
+    | sed "s|https://localhost:6443|${KUBECONFIG_URL}|g" \
     > ~/.kube/config
   chmod 600 ~/.kube/config
-  info "kubeconfig written to ~/.kube/config (server: ${SERVER_URL})"
+  info "kubeconfig written to ~/.kube/config (server: ${KUBECONFIG_URL})"
 }
 
 # ---- run --------------------------------------------------------------------

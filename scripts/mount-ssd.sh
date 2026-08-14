@@ -44,7 +44,6 @@ done
 # ---- helpers ----------------------------------------------------------------
 
 kv_get() { grep -E "^${1}=" "$2" 2>/dev/null | head -1 | cut -d= -f2- || true; }
-ip_add()  { local p="${1%.*}" l="${1##*.}"; echo "${p}.$((l + $2))"; }
 say()     { echo "==> $*"; }
 info()    { echo "    $*"; }
 err()     { echo "ERROR: $*" >&2; exit 1; }
@@ -63,9 +62,7 @@ node_ssh() {
 [[ -f "$CONFIG_FILE" ]] || err "Config not found: $CONFIG_FILE"
 [[ -f "$STATE_FILE"  ]] || err "State not found: $STATE_FILE"
 
-TPI_BASE=$(kv_get TPI_BASE_IP_ADDR "$CONFIG_FILE")
 NODE_COUNT=$(kv_get NODE_COUNT      "$CONFIG_FILE")
-[[ -n "$TPI_BASE"   ]] || err "TPI_BASE_IP_ADDR not set in $CONFIG_FILE"
 [[ -n "$NODE_COUNT" ]] || NODE_COUNT=4
 
 # ---- detect which nodes have NVMe -------------------------------------------
@@ -73,19 +70,15 @@ NODE_COUNT=$(kv_get NODE_COUNT      "$CONFIG_FILE")
 detect_ssd_nodes() {
   say "Detecting NVMe devices on all nodes…"
   SSD_NODES=()
-  SSD_IPS=()
   for (( i=1; i<=NODE_COUNT; i++ )); do
-    local ip node
-    ip=$(ip_add "$TPI_BASE" "$i")
-    node="rk1-node${i}"
+    local node="rk1-node${i}"
     local dev
-    dev=$(node_ssh "$ip" "test -b /dev/nvme0n1 && echo present || echo absent" 2>/dev/null || echo absent)
+    dev=$(node_ssh "$node" "test -b /dev/nvme0n1 && echo present || echo absent" 2>/dev/null || echo absent)
     if [[ "$dev" == "present" ]]; then
-      info "${node} (${ip}): /dev/nvme0n1 found"
+      info "${node}: /dev/nvme0n1 found"
       SSD_NODES+=("$node")
-      SSD_IPS+=("$ip")
     else
-      info "${node} (${ip}): no NVMe — skipping"
+      info "${node}: no NVMe — skipping"
     fi
   done
   if [[ ${#SSD_NODES[@]} -eq 0 ]]; then
@@ -97,8 +90,8 @@ detect_ssd_nodes() {
 # ---- format /dev/nvme0n1p1 (idempotent) ------------------------------------
 
 format_node() {
-  local node="$1" ip="$2"
-  say "Formatting ${node} (${ip})…"
+  local node="$1"
+  say "Formatting ${node}…"
 
   if (( DRY )); then
     info "[dry-run] Would: parted -s /dev/nvme0n1 mklabel gpt mkpart primary ext4 0% 100%"
@@ -107,25 +100,25 @@ format_node() {
   fi
 
   local fs_type
-  fs_type=$(node_ssh "$ip" "sudo blkid -s TYPE -o value /dev/nvme0n1p1 2>/dev/null || true")
+  fs_type=$(node_ssh "$node" "sudo blkid -s TYPE -o value /dev/nvme0n1p1 2>/dev/null || true")
   if [[ "$fs_type" == "ext4" ]]; then
     info "${node}: nvme0n1p1 already ext4 — skipping format."
     return 0
   fi
 
   info "${node}: creating GPT partition table and ext4 partition…"
-  node_ssh "$ip" "sudo parted -s /dev/nvme0n1 mklabel gpt mkpart primary ext4 0% 100%"
+  node_ssh "$node" "sudo parted -s /dev/nvme0n1 mklabel gpt mkpart primary ext4 0% 100%"
   # Let udev settle so nvme0n1p1 appears
-  node_ssh "$ip" "sudo udevadm settle 2>/dev/null || sleep 2"
-  node_ssh "$ip" "sudo mkfs.ext4 -F /dev/nvme0n1p1"
+  node_ssh "$node" "sudo udevadm settle 2>/dev/null || sleep 2"
+  node_ssh "$node" "sudo mkfs.ext4 -F /dev/nvme0n1p1"
   info "${node}: formatted."
 }
 
 # ---- mount /mnt/ssd (idempotent) --------------------------------------------
 
 mount_node() {
-  local node="$1" ip="$2"
-  say "Mounting /mnt/ssd on ${node} (${ip})…"
+  local node="$1"
+  say "Mounting /mnt/ssd on ${node}…"
 
   if (( DRY )); then
     info "[dry-run] Would: mkdir -p /mnt/ssd, fstab UUID entry, mount -a"
@@ -134,37 +127,37 @@ mount_node() {
   fi
 
   local mounted
-  mounted=$(node_ssh "$ip" "mountpoint -q /mnt/ssd && echo yes || echo no")
+  mounted=$(node_ssh "$node" "mountpoint -q /mnt/ssd && echo yes || echo no")
   if [[ "$mounted" == "yes" ]]; then
     info "${node}: /mnt/ssd already mounted — skipping."
     return 0
   fi
 
   local uuid
-  uuid=$(node_ssh "$ip" "sudo blkid -s UUID -o value /dev/nvme0n1p1")
+  uuid=$(node_ssh "$node" "sudo blkid -s UUID -o value /dev/nvme0n1p1")
   [[ -n "$uuid" ]] || err "${node}: could not get UUID for nvme0n1p1 — format step may have failed"
 
   local in_fstab
-  in_fstab=$(node_ssh "$ip" "grep -q '$uuid' /etc/fstab && echo yes || echo no")
+  in_fstab=$(node_ssh "$node" "grep -q '$uuid' /etc/fstab && echo yes || echo no")
 
-  node_ssh "$ip" "sudo mkdir -p /mnt/ssd"
+  node_ssh "$node" "sudo mkdir -p /mnt/ssd"
 
   if [[ "$in_fstab" == "no" ]]; then
     info "${node}: adding fstab entry (UUID=${uuid})…"
-    node_ssh "$ip" "echo 'UUID=${uuid}  /mnt/ssd  ext4  defaults,noatime  0  2' | sudo tee -a /etc/fstab > /dev/null"
+    node_ssh "$node" "echo 'UUID=${uuid}  /mnt/ssd  ext4  defaults,noatime  0  2' | sudo tee -a /etc/fstab > /dev/null"
   else
     info "${node}: fstab entry already present."
   fi
 
-  node_ssh "$ip" "sudo mount -a"
+  node_ssh "$node" "sudo mount -a"
 
   # Verify
-  mounted=$(node_ssh "$ip" "mountpoint -q /mnt/ssd && echo yes || echo no")
+  mounted=$(node_ssh "$node" "mountpoint -q /mnt/ssd && echo yes || echo no")
   [[ "$mounted" == "yes" ]] || err "${node}: /mnt/ssd is not mounted after mount -a"
   info "${node}: /mnt/ssd mounted."
 
   # Create provisioner subdirectory now so the provisioner pod can write to it
-  node_ssh "$ip" "sudo mkdir -p /mnt/ssd/local-path-provisioner && sudo chmod 777 /mnt/ssd/local-path-provisioner"
+  node_ssh "$node" "sudo mkdir -p /mnt/ssd/local-path-provisioner && sudo chmod 777 /mnt/ssd/local-path-provisioner"
 
   # Label the node so workloads can express "I need NVMe" without naming a host
   if ! (( DRY )); then
@@ -248,17 +241,15 @@ EOF
 verify() {
   say "SSD mount status:"
   for (( i=1; i<=NODE_COUNT; i++ )); do
-    local ip node
-    ip=$(ip_add "$TPI_BASE" "$i")
-    node="rk1-node${i}"
+    local node="rk1-node${i}"
     local nvme mounted df_out
-    nvme=$(node_ssh "$ip" "test -b /dev/nvme0n1 && echo present || echo absent" 2>/dev/null || echo unreachable)
-    mounted=$(node_ssh "$ip" "mountpoint -q /mnt/ssd && echo yes || echo no" 2>/dev/null || echo unreachable)
+    nvme=$(node_ssh "$node" "test -b /dev/nvme0n1 && echo present || echo absent" 2>/dev/null || echo unreachable)
+    mounted=$(node_ssh "$node" "mountpoint -q /mnt/ssd && echo yes || echo no" 2>/dev/null || echo unreachable)
     if [[ "$mounted" == "yes" ]]; then
-      df_out=$(node_ssh "$ip" "df -h /mnt/ssd | tail -1 | awk '{print \$2\" total, \"\$4\" avail\"}'")
-      info "OK  ${node} (${ip}): NVMe=${nvme}, /mnt/ssd mounted (${df_out})"
+      df_out=$(node_ssh "$node" "df -h /mnt/ssd | tail -1 | awk '{print \$2\" total, \"\$4\" avail\"}'")
+      info "OK  ${node}: NVMe=${nvme}, /mnt/ssd mounted (${df_out})"
     else
-      info "--- ${node} (${ip}): NVMe=${nvme}, /mnt/ssd not mounted"
+      info "--- ${node}: NVMe=${nvme}, /mnt/ssd not mounted"
     fi
   done
   echo
@@ -289,9 +280,9 @@ if (( DO_NODES )); then
     read -r < /dev/tty
   fi
 
-  for (( i=0; i<${#SSD_NODES[@]}; i++ )); do
-    format_node "${SSD_NODES[$i]}" "${SSD_IPS[$i]}"
-    mount_node  "${SSD_NODES[$i]}" "${SSD_IPS[$i]}"
+  for node in "${SSD_NODES[@]}"; do
+    format_node "$node"
+    mount_node  "$node"
     echo
   done
 fi

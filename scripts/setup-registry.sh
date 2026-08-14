@@ -59,7 +59,6 @@ kv_set() {
     echo "${key}=${val}" >> "$file"
   fi
 }
-ip_add()  { local p="${1%.*}" l="${1##*.}"; echo "${p}.$((l + $2))"; }
 say()     { echo "==> $*"; }
 info()    { echo "    $*"; }
 err()     { echo "ERROR: $*" >&2; exit 1; }
@@ -79,14 +78,11 @@ node_ssh() {
 [[ -f "$CONFIG_FILE" ]] || err "Config file not found: $CONFIG_FILE"
 [[ -f "$STATE_FILE"  ]] || err "State file not found: $STATE_FILE"
 
-TPI_BASE=$(kv_get TPI_BASE_IP_ADDR "$CONFIG_FILE")
 SERVER_IDX=$(kv_get SERVER_NODE_IDX "$CONFIG_FILE")
 NODE_COUNT=$(kv_get NODE_COUNT      "$CONFIG_FILE")
-[[ -n "$TPI_BASE"    ]] || err "TPI_BASE_IP_ADDR not set in $CONFIG_FILE"
 [[ -n "$SERVER_IDX"  ]] || SERVER_IDX=1
 [[ -n "$NODE_COUNT"  ]] || NODE_COUNT=4
 
-SERVER_IP=$(ip_add "$TPI_BASE" "$SERVER_IDX")
 SERVER_NODE="rk1-node${SERVER_IDX}"
 REGISTRY_ADDR="${SERVER_NODE}:5000"
 
@@ -123,10 +119,10 @@ stage_certs() {
 stage_stop_old() {
   say "Removing Phase A Docker registry container on ${SERVER_NODE} (if present)…"
   if (( DRY )); then
-    info "[dry-run] Would run: sudo docker stop registry && sudo docker rm registry on ${SERVER_IP}"
+    info "[dry-run] Would run: sudo docker stop registry && sudo docker rm registry on ${SERVER_NODE}"
     return 0
   fi
-  node_ssh "$SERVER_IP" \
+  node_ssh "$SERVER_NODE" \
     "sudo docker stop registry 2>/dev/null || true; sudo docker rm registry 2>/dev/null || true"
   info "Done (no-op if container was already gone)."
 }
@@ -203,10 +199,9 @@ stage_ca_distribute() {
   (( DRY )) && dry_flag=(--dry-run)
 
   for (( i=1; i<=NODE_COUNT; i++ )); do
-    local node_ip
-    node_ip=$(ip_add "$TPI_BASE" "$i")
-    say "  Node rk1-node${i} (${node_ip})…"
-    bash "$install_ca" "$node_ip" \
+    local node_name="rk1-node${i}"
+    say "  Node ${node_name}…"
+    bash "$install_ca" "$node_name" \
       --ca-cert "${CERT_DIR}/myCA.crt" \
       --registry "$REGISTRY_ADDR" \
       --config "$CONFIG_FILE" \
@@ -300,7 +295,7 @@ stage_migrate_pvc() {
 
   # Verify the SSD is actually mounted on the server node
   local ssd_mounted
-  ssd_mounted=$(node_ssh "$SERVER_IP" "mountpoint -q /mnt/ssd && echo yes || echo no" 2>/dev/null || echo no)
+  ssd_mounted=$(node_ssh "$SERVER_NODE" "mountpoint -q /mnt/ssd && echo yes || echo no" 2>/dev/null || echo no)
   [[ "$ssd_mounted" == "yes" ]] \
     || err "/mnt/ssd is not mounted on ${SERVER_NODE}. Run mount-ssd.sh first."
 

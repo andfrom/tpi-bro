@@ -38,7 +38,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 kv_get() { grep -E "^${1}=" "$2" 2>/dev/null | head -1 | cut -d= -f2- || true; }
-ip_add()  { local p="${1%.*}" l="${1##*.}"; echo "${p}.$((l + $2))"; }
 say()     { echo "==> $*"; }
 info()    { echo "    $*"; }
 err()     { echo "ERROR: $*" >&2; exit 1; }
@@ -54,13 +53,10 @@ node_ssh() {
 
 [[ -f "$CONFIG_FILE" ]] || err "Config not found: $CONFIG_FILE"
 
-TPI_BASE=$(kv_get TPI_BASE_IP_ADDR "$CONFIG_FILE")
-[[ -n "$TPI_BASE" ]] || err "TPI_BASE_IP_ADDR not set in $CONFIG_FILE"
-
 SERVER_IDX=$(kv_get SERVER_NODE_IDX "$CONFIG_FILE"); SERVER_IDX="${SERVER_IDX:-1}"
-SERVER_IP=$(ip_add "$TPI_BASE" "$SERVER_IDX")
+SERVER_NODE="rk1-node${SERVER_IDX}"
 
-say "Configuring rk1-node${SERVER_IDX} (${SERVER_IP}) as Tailscale subnet router"
+say "Configuring ${SERVER_NODE} as Tailscale subnet router"
 info "Advertising: ${POD_CIDR} (pods), ${SVC_CIDR} (services)"
 
 if (( DRY )); then
@@ -74,19 +70,19 @@ if (( DRY )); then
 fi
 
 say "Enabling IP forwarding…"
-node_ssh "$SERVER_IP" "printf 'net.ipv4.ip_forward = 1\nnet.ipv6.conf.all.forwarding = 1\n' \
+node_ssh "$SERVER_NODE" "printf 'net.ipv4.ip_forward = 1\nnet.ipv6.conf.all.forwarding = 1\n' \
   | sudo tee /etc/sysctl.d/99-tailscale.conf > /dev/null \
   && sudo sysctl -p /etc/sysctl.d/99-tailscale.conf > /dev/null"
 
 say "Advertising subnet routes…"
 # Must restate all non-default flags when changing settings via tailscale up.
-node_ssh "$SERVER_IP" "sudo tailscale up \
+node_ssh "$SERVER_NODE" "sudo tailscale up \
   --hostname=rk1-node${SERVER_IDX} \
   --advertise-routes=${POD_CIDR},${SVC_CIDR} \
   --accept-routes=false \
   --accept-dns=false"
 
-ts_ip=$(node_ssh "$SERVER_IP" "tailscale ip -4 2>/dev/null" || true)
+ts_ip=$(node_ssh "$SERVER_NODE" "tailscale ip -4 2>/dev/null" || true)
 say "Done. rk1-node${SERVER_IDX} Tailscale IP: ${ts_ip:-<check admin console>}"
 info ""
 info "============================================================"

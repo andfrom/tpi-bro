@@ -184,6 +184,44 @@ layer. No per-node SSH at dispatch time — a single API server query only.
 
 ---
 
+### E-06: Consume tagx's deployment-manifest image labels
+
+**Status:** Future dev — not started, no urgency yet (single schema version,
+single consumer chart).
+
+tagx's ADR-0008 (`tagx/docs/adr/0008-deployment-manifest-image-labels.md`,
+Proposed as of 2026-08-14, not yet implemented on tagx's side either) has
+tagx publish OCI labels on each model-bearing image tag: `tagx.model`,
+`tagx.requires-capability` (reusing this repo's own `tpi-bro/<capability>`
+vocabulary from ADR-0022), `tagx.validated-date`/`-node`, and
+`tagx.manifest-schema-version`. Nothing on this side reads them yet —
+`charts/whisper/values.yaml`'s `rknn.enabled` boolean is still a manual
+flag with no check that the target tag exists or matches the node.
+
+Two separate pieces, only worth building once tagx actually ships the labels:
+
+1. **Read `tagx.requires-capability` before scheduling** — query the tag's
+   labels via the registry manifest API (no image pull needed), confirm the
+   target node's `tpi-bro/<capability>` labels satisfy it, fail fast instead
+   of deploying `--privileged` and finding out at runtime. Replaces the
+   manual `rknn.enabled` boolean in `charts/whisper/values.yaml`.
+2. **Auto-populate `tpi-bro/model-loaded` from `tagx.model`** — closes the
+   gap in ADR-0027's model-affinity mechanism, which currently has no
+   automated source for what a given image actually needs.
+
+**Deferred, not decided here:** how this chart expresses "which
+`tagx.manifest-schema-version` I can consume" — e.g. a
+`tagx.io/requires-manifest-schema` constraint in `Chart.yaml`/`values.yaml`,
+mirroring how a chart already declares a `kubeVersion` constraint. Not worth
+designing until there's a second schema version to actually negotiate
+between; tagx's ADR-0008 explicitly leaves this open rather than speculating
+on a compatibility-negotiation mechanism neither repo needs yet.
+
+First consumer: W-01/W-02 (Whisper STT), once `images/whisper-stt/app/`
+actually exists in tagx and there's a real CPU tag to attach labels to.
+
+---
+
 ## Whisper STT
 
 ### W-01: Helm chart for batch STT jobs with model cache (CPU)
