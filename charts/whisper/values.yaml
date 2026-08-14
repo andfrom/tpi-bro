@@ -1,0 +1,49 @@
+image:
+  repository: rk1-node1:5000/tagx/whisper-stt
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Whisper model size (e.g. large-v3, medium). Passed through as WHISPER_MODEL.
+model: large-v3
+
+language: auto
+beamSize: 5
+
+modelCache:
+  size: 50Gi
+  storageClass: local-ssd
+  mountPath: /models
+
+# Caller-supplied audio input — tpi-bro provides scheduling/storage only, not
+# the audio itself. claimName must be an existing PVC.
+audio:
+  claimName: ""
+  filePath: ""
+  mountPath: /audio
+
+# RKNN acceleration (W-02). Disabled by default — the CPU variant deploys
+# cleanly with rknn.enabled: false. When true, switches to the RKNN image
+# entrypoint and adds NPU device access.
+#
+# Current validated approach is --privileged (ADR-0023 hasn't confirmed the
+# exact device nodes yet). Once it does, set privileged: false and list the
+# specific devices instead:
+#   devices:
+#     - /dev/dri/renderD128   # likely the NPU render node (unconfirmed)
+#     - /dev/mpp_service      # Rockchip MPP (confirmed present)
+rknn:
+  enabled: false
+  privileged: true
+  devices: []
+
+priorityClassName: background
+
+resources:
+  requests:
+    cpu: "2"
+    memory: "4Gi"
+  limits:
+    memory: "12Gi"
+
+# One-shot Job — don't retry a bad transcription indefinitely.
+backoffLimit: 1

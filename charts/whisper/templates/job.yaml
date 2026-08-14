@@ -1,0 +1,96 @@
+{{- if not .Values.audio.claimName }}
+{{- fail "audio.claimName is required — an existing PVC containing the input audio." }}
+{{- end }}
+{{- if not .Values.audio.filePath }}
+{{- fail "audio.filePath is required — path to the audio file within audio.claimName." }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  backoffLimit: {{ .Values.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      priorityClassName: {{ .Values.priorityClassName | quote }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: storage.tpi-bro/nvme
+                    operator: In
+                    values: ["true"]
+                {{- if .Values.rknn.enabled }}
+                  - key: tpi-bro/npu
+                    operator: In
+                    values: ["rk3588"]
+                {{- end }}
+      containers:
+        - name: whisper
+          image: "{{ .Values.image.repository }}:{{ if .Values.rknn.enabled }}rknn{{ else }}{{ .Values.image.tag }}{{ end }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.rknn.enabled }}
+          # RKNN entrypoint takes the audio path as a CLI arg (see Dockerfile.rknn).
+          args:
+            - --audio
+            - "{{ .Values.audio.mountPath }}/{{ .Values.audio.filePath }}"
+          securityContext:
+            privileged: {{ .Values.rknn.privileged }}
+          {{- end }}
+          env:
+            - name: WHISPER_MODEL
+              value: {{ .Values.model | quote }}
+            - name: WHISPER_CACHE
+              value: {{ .Values.modelCache.mountPath | quote }}
+            - name: WHISPER_LANGUAGE
+              value: {{ .Values.language | quote }}
+            - name: WHISPER_BEAM_SIZE
+              value: {{ .Values.beamSize | quote }}
+            {{- if .Values.rknn.enabled }}
+            # Dockerfile.rknn defaults these to the `medium` filenames; override
+            # to match whichever model this release requests.
+            - name: WHISPER_ENCODER
+              value: "{{ .Values.modelCache.mountPath }}/whisper_encoder_{{ .Values.model }}.rknn"
+            - name: WHISPER_DECODER
+              value: "{{ .Values.modelCache.mountPath }}/whisper_decoder_{{ .Values.model }}.rknn"
+            {{- else }}
+            # CPU (faster-whisper) entrypoint's audio-input contract is not yet
+            # defined — images/whisper-stt/app/ doesn't exist in tagx yet. This
+            # assumes an env var consistent with the other WHISPER_* vars the
+            # Dockerfile already sets; confirm/adjust once that app exists.
+            - name: WHISPER_AUDIO_PATH
+              value: "{{ .Values.audio.mountPath }}/{{ .Values.audio.filePath }}"
+            {{- end }}
+          volumeMounts:
+            - name: model-cache
+              mountPath: {{ .Values.modelCache.mountPath }}
+            - name: audio-input
+              mountPath: {{ .Values.audio.mountPath }}
+              readOnly: true
+            {{- if .Values.rknn.enabled }}
+            {{- range .Values.rknn.devices }}
+            - name: {{ . | base | replace "." "-" }}
+              mountPath: {{ . }}
+            {{- end }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-models
+        - name: audio-input
+          persistentVolumeClaim:
+            claimName: {{ .Values.audio.claimName }}
+        {{- if .Values.rknn.enabled }}
+        {{- range .Values.rknn.devices }}
+        - name: {{ . | base | replace "." "-" }}
+          hostPath:
+            path: {{ . }}
+        {{- end }}
+        {{- end }}

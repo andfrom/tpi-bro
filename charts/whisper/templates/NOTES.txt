@@ -1,0 +1,13 @@
+Whisper transcription Job {{ .Release.Name }} submitted ({{ if .Values.rknn.enabled }}RKNN-accelerated{{ else }}CPU{{ end }}, model: {{ .Values.model }}).
+
+Watch it run:
+  kubectl get job -n {{ .Release.Namespace }} {{ .Release.Name }} -w
+
+Read the transcription output:
+  kubectl logs -n {{ .Release.Namespace }} job/{{ .Release.Name }}
+
+Re-run with a different audio file or model — Jobs are immutable, so upgrade
+won't work; delete and reinstall instead:
+  helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+  helm install {{ .Release.Name }} ./charts/whisper -n {{ .Release.Namespace }} \
+    --set audio.claimName=... --set audio.filePath=...
