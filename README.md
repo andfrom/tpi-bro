@@ -202,7 +202,7 @@ Everything after bootstrap is handled declaratively via Kubernetes manifests and
 
 **Phase C:** Local registry mirror + sync from laptop, IP resilience (static DHCP or CoreDNS), cloud expansion notes. Not started.
 
-**Phase D:** Multi-agent workloads, Ollama per node, observability. **D-01 (Ollama) + D-02 (sibling-app's Agent A + Agent B) + D-04 (Prometheus + Grafana) complete.** RKNN NPU inference validated on node1 (Whisper medium, 2026-06-16). Next: KV-cache decoder (W-03), GitOps (B-04), MetalLB (B-05).
+**Phase D:** Multi-agent workloads, Ollama per node, observability. **D-01 (Ollama) + D-02 (Agent A) + D-04 (Prometheus + Grafana) complete.** RKNN NPU inference validated on node1 — Whisper `medium` STT container images built and benchmarked, 2026-06-16. Next: KV-cache decoder (W-03), GitOps (B-04), MetalLB (B-05).
 
 Recommended workflow:
 1. Build & push images from CI/CD into the cluster-local registry
