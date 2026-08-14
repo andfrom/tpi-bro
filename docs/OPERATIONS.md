@@ -174,6 +174,10 @@ Registry PVC `registry-data` is on `local-ssd` (node1, co-located with HostPort 
 
 ## Known Issues
 
+Cluster bootstrap/network issues below. For NPU/RKNN hardware and firmware
+issues (device access, driver coupling, silicon limits), see
+`HARDWARE-FIRMWARE-ISSUES.md` instead.
+
 - `turingpi.local` mDNS resolution can fail when only WiFi is available on some networks; fall back to using the static IP `192.168.1.10` directly
 - Ubuntu 24.04.1 LTS enforces a mandatory password change on first boot; the bootstrap script handles this automatically via `unlock_expired_password`
 - BMC's `nmap`-based auto-detection (A1) depends on reverse-DNS resolving the literal hostname "turingpi," which most networks don't provide — expect the manual IP-entry fallback to be the normal path, not a corner case

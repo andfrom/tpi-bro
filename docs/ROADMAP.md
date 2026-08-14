@@ -91,9 +91,13 @@ Whisper `medium` inference on the RK3588 NPU already works (see `docs/NPU-MODELS
 ## Immediate Next Steps
 
 1. **W-03: KV-cache decoder** — split Whisper decoder into cross-attention KV encoder (once) + per-token autoregressive decoder; expected ~100× speedup for NPU decoding.
-2. **NPU device node (E-02)** — confirm which `/dev/dri/renderD*` node the RKNN runtime uses; replace `--privileged` with explicit device mount.
-3. **large-v3 RKNN conversion** — next model in priority table after medium validated.
-4. **D-00: PriorityClass + ResourceRequests** — add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
-5. **B5-metallb** — stable registry VIP; removes the HostPort-forced node1 pin.
+2. **large-v3 RKNN conversion** — next model in priority table after medium validated.
+3. **D-00: PriorityClass + ResourceRequests** — add `interactive`/`background` PriorityClasses and resource requests/limits to all agent and Ollama Deployments.
+4. **B5-metallb** — stable registry VIP; removes the HostPort-forced node1 pin.
+
+(NPU device node confirmed 2026-08-14 — it's `/dev/dri/card1`, not a `renderD*`
+node. `--privileged` stays regardless: the vendor runtime's own SoC
+auto-detection breaks once container masking is lifted, unrelated to which
+device is named. See `adr/ADR-0023-rknn-npu-device-access-pattern.md`.)
 
 See `docs/OPERATIONS.md` for hardware inventory, access methods, and current cluster state, and `backlog/BACKLOG.md` for the ordered backlog.

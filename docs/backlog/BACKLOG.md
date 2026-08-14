@@ -210,8 +210,8 @@ Two separate pieces, only worth building once tagx actually ships the labels:
    automated source for what a given image actually needs.
 
 **Deferred, not decided here:** how this chart expresses "which
-`tagx.manifest-schema-version` I can consume" — e.g. a
-`tagx.io/requires-manifest-schema` constraint in `Chart.yaml`/`values.yaml`,
+`tagx.manifest-schema-version` I can consume" — e.g. a version-constraint
+field in `Chart.yaml`/`values.yaml` (exact key naming not decided),
 mirroring how a chart already declares a `kubeVersion` constraint. Not worth
 designing until there's a second schema version to actually negotiate
 between; tagx's ADR-0008 explicitly leaves this open rather than speculating

@@ -6,6 +6,24 @@ quantization produces empty or garbage transcriptions**. This documents where
 and why it breaks, with per-layer evidence, and a working hybrid-precision
 workaround. Kept open here until fixed upstream.
 
+## Vendor response tracker
+
+airockchip's actual track record on this issue, checked periodically via
+`gh issue view 314 --repo airockchip/rknn_model_zoo`:
+
+| | |
+|---|---|
+| Filed | 2025-04-16, by @dulimov (community reporter, not us) |
+| Independent confirmations | @wgh-2018 (2025-06-13, asking if anyone got INT8 working); @Mhrooz (2026-01-08, same symptom — garbage/looping output on real audio) |
+| Maintainer (airockchip) response | **None** — zero comments from an airockchip org member as of last check, on an issue open since April 2025 |
+| Our contribution | Root cause diagnosed here 2026-06-18 (attention softmax/SDPA collapse, not calibration data) + a working hybrid-precision workaround. Draft comments to post upstream are ready (bottom of this doc) — **not yet posted**, gated on this repo going public (see `docs/backlog/BACKLOG.md` NC-03) |
+| Last checked | 2026-08-14 |
+
+Three independent reporters, sixteen months, zero official response. This is
+the concrete data point behind the "closed-source SDK, thin vendor support"
+warning in `IS-THIS-FOR-YOU.md` — worth knowing before betting a project on
+this NPU stack rather than just this one issue.
+
 ## Environment
 - rknn-toolkit2 2.3.2, librknnrt 2.3.2, RKNPU driver 0.9.7, RK3588 (TuringPi RK1)
 - Whisper **medium** encoder, FP16 baseline vs INT8 (`do_quantization=True`)
@@ -106,3 +124,8 @@ Broader RK3588 NPU characterization (where this finding originated):
 > to **INT8**, via `hybrid_quantization_step1/step2`. Retains most of the INT8
 > speedup since the FFN is where the compute is. Config + measured results:
 > https://github.com/andfrom/tpi-bro/blob/main/docs/RKNN-INT8-WHISPER-314.md
+
+---
+
+See also: `HARDWARE-FIRMWARE-ISSUES.md` — index of this and other outstanding
+RK3588 hardware/firmware issues.

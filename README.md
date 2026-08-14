@@ -10,6 +10,23 @@
 >
 > **Disclaimer**: This project has yet to play with Nvidia Jetson (Orin) Nano and CM4 adapters for RPi, so it's not possible to tell if these scripts and instructions will help anyone to get started for such configurations.
 
+## Is this for you?
+
+Before you buy hardware: a TuringPi 2 + RK1 cluster is a genuinely fun,
+low-power platform for learning real Kubernetes/GitOps operations and
+experimenting with on-device NPU inference — it is **not**, today, a
+GPU-class LLM inference box or a real-time transcription appliance. The
+RK3588 NPU's advertised 6 TOPS/module doesn't translate to 6 TOPS of usable
+transformer throughput (measured FP16 matmul ceiling is ~230 GFLOP/s; INT8
+would be much faster but is currently broken for transformer models on this
+stack).
+
+**→ [docs/IS-THIS-FOR-YOU.md](docs/IS-THIS-FOR-YOU.md)** is the pragmatic,
+experience-based rundown — measured performance, what actually works today
+(batch Whisper STT, small local LLMs, general cluster ops), what doesn't yet
+(real-time NPU transcription, anything GPU-shaped), and the real roadblocks
+hit building this.
+
 ## Getting started
 
 **→ [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) is the full installation walkthrough** — hardware assembly, prerequisites, Phase A (flash/name/network), Phase B (k3s/registry/storage), Tailscale, and populating the registry with application images. Start there.
@@ -238,6 +255,12 @@ By drawing the line here, the system is reproducible from bare metal up through 
 | GPU | Mali G610 MP4 (OpenCL; not suitable for LLM inference) |
 | NPU | 6 TOPS per module (24 TOPS total); RKNN inference validated (Whisper medium, 2026-06-16) |
 | Idle power | ~10 W per module |
+
+Advertised NPU TOPS is an INT8 conv figure; real transformer (matmul-heavy,
+FP16-only until INT8 is fixed) throughput is much lower. See
+[docs/IS-THIS-FOR-YOU.md](docs/IS-THIS-FOR-YOU.md) for the measured numbers
+and [docs/HARDWARE-FIRMWARE-ISSUES.md](docs/HARDWARE-FIRMWARE-ISSUES.md) for
+the specific hardware/firmware issues behind that gap.
 
 ### LLM Placement Constraint
 
