@@ -80,12 +80,6 @@ with `--dry-run` on a live node, then proceed with the hardware swap.
 
 ## Documentation
 
-### DOC-01: Expand README with BMC reconnection steps
-Document how to find the BMC if `turingpi.local` mDNS fails (use `nmap` scan, check router DHCP table, or fall back to Ethernet direct connect).
-
-### DOC-03: CONTRIBUTING.md
-Contribution guide, issue templates, PR checklist.
-
 ### DOC-04: Jetson Orin Nano / CM4 support
 Currently untested. Document gaps once hardware is available.
 

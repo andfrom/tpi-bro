@@ -172,6 +172,51 @@ All three NVMe nodes are labeled `storage.tpi-bro/nvme=true`. Workloads express 
 
 Registry PVC `registry-data` is on `local-ssd` (node1, co-located with HostPort 5000). The HostPort node1 pin is permanent in practice: the registry's local-SSD PVC ties it to node1 regardless of what IP fronts it (MetalLB was evaluated and dropped 2026-08-15 — see ROADMAP/backlog C-01).
 
+## Finding and reconnecting to the BMC (DOC-01)
+
+The BMC is the cluster's always-on anchor — power control, serial consoles,
+flashing, and the self-healing outer loop all go through it. When
+`turingpi.local` doesn't resolve (common: mDNS rarely crosses WiFi/VLAN
+boundaries), find it in this order:
+
+1. **Static IP first.** If `setup-static-ips.sh` has ever run, the BMC is at
+   the base address of the scheme (default `192.168.1.10`; nodes are
+   base+1…4). `ping 192.168.1.10`, then `ssh root@192.168.1.10` (or
+   `tpi --host 192.168.1.10 …`).
+2. **Router DHCP table.** A factory-fresh or reflashed BMC DHCPs; look for
+   hostname `turingpi` in the router's client list.
+3. **nmap sweep.** `nmap -sn 192.168.1.0/24` and look for the BMC's MAC
+   vendor, or `nmap -p 22,80 --open` — the BMC answers on both (ssh +
+   web UI). Note the bootstrap's own A1 auto-detection depends on
+   reverse-DNS resolving "turingpi", which most networks don't provide —
+   manual IP entry is the normal path.
+4. **Direct Ethernet.** Cable a laptop straight into one of the board's
+   Ethernet ports (the BMC bridges `ge0`/`ge1` with the node ports on
+   `br0`); run a DHCP server or set a static `192.168.1.x` on the laptop
+   and hit `192.168.1.10`.
+
+Once connected, the reconnection toolbox:
+
+| Need | Command |
+|---|---|
+| Node power state | `tpi --host <BMC> power status` |
+| Power-cycle a hung node | `tpi --host <BMC> power off -n N && sleep 8 && tpi --host <BMC> power on -n N` |
+| Serial console of a node (boot diagnosis, no network needed) | `tpi --host <BMC> uart -n N get` |
+| BMC shell | `ssh root@<BMC>` (BusyBox; overlay rootfs on `/`, persistent storage on `/mnt/sdcard`) |
+| Self-healing watchdog status/log | `scripts/install-bmc-watchdog.sh --verify` |
+
+Two persistence caveats, learned the hard way:
+
+- **BMC firmware updates may reset the `/etc` overlay** — the static-IP
+  config (`setStaticNet.sh`) and the self-healing watchdog live there.
+  After any BMC firmware update, re-run `setup-static-ips.sh --bmc-only`
+  and `install-bmc-watchdog.sh`.
+- A node can boot "healthy" but be unreachable (warm-reboot PCIe flake —
+  see `HARDWARE-FIRMWARE-ISSUES.md`). Don't debug the node over the
+  network you can't reach it on: read its boot log via `tpi uart -n N get`
+  from the BMC, then cold-cycle. The BMC watchdog automates exactly this
+  (`SELF-HEALING.md`).
+
 ## Known Issues
 
 Cluster bootstrap/network issues below. For NPU/RKNN hardware and firmware

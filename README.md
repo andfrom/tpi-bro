@@ -56,6 +56,22 @@ priority bands rotating, evicted chunks re-queuing themselves), and puts
 the whole thing on a Grafana dashboard: `./scripts/run-focus-demo.sh
 scenario`.
 
+## It heals itself
+
+An unattended cluster is only as good as its worst night. tpi-bro recovers
+autonomously from the failures this hardware actually produced during
+development: a kernel-starved node (a runaway NPU-runtime allocation ate
+all 32 GB — the on-SoC hardware watchdog now resets that in **~50 s**), a
+node that hangs unreachable (a BMC-resident watchdog probes every node's
+ssh banner and cold power-cycles after guarded thresholds — no boot loops
+by construction), and the sneakiest one: a node that boots "healthy" with
+its NVMe missing after a warm reboot's PCIe link-training flake (a deep
+probe via node-exporter catches it; a cold cycle is exactly the fix, and a
+Prometheus alert fires if the watchdog ever gives up). Every layer was
+validated by deliberately crashing live nodes, and interrupted queue work
+re-enqueues by contract. Details, guards, and the runbook:
+[docs/SELF-HEALING.md](docs/SELF-HEALING.md).
+
 ## Getting started
 
 **→ [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) is the full installation walkthrough** — hardware assembly, prerequisites, Phase A (flash/name/network), Phase B (k3s/registry/storage), Tailscale, and populating the registry with application images. Start there.
@@ -166,7 +182,10 @@ chmod +x scripts/*.sh scripts/*.exp
 Full usage, flashing modes, BMC firmware handling, troubleshooting, and
 configuration variables are all covered in
 [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md). Show all CLI flags with
-`./scripts/bootstrap-turingpi-cluster.exp --help`.
+`./scripts/bootstrap-turingpi-cluster.exp --help`. Lost contact with the
+board? [docs/OPERATIONS.md](docs/OPERATIONS.md) §"Finding and reconnecting
+to the BMC" is the recovery path (mDNS failure, nmap sweep, direct
+Ethernet, serial consoles).
 
 ---
 
