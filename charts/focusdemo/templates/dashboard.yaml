@@ -2,6 +2,18 @@
 # sidecar looks for it: a ConfigMap in the `monitoring` namespace labelled
 # grafana_dashboard=1 (the sidecar's default search scope is its own
 # namespace).
+#
+# Panel design notes (learned from the first live run):
+# - Slot ownership is a state timeline, not a line chart: the arena has ONE
+#   slot on ONE node by design, so each task is simply "holds it or not" —
+#   interpolated 0/1 lines drew misleading triangles.
+# - redis_exporter only exports keys that EXIST and Redis deletes empty
+#   lists, so naive queue-depth series vanish instead of reading 0; each
+#   queue gets a fixed query with an `or vector(0)` fallback and a human
+#   legend.
+# - kube_pod_info has an empty node label for Pending pods (rendered as a
+#   bogus "Value" series) and lingers for completed job history; the node
+#   panel joins against phase=Running so it counts only what actually runs.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -19,11 +31,38 @@ data:
       "time": {"from": "now-15m", "to": "now"},
       "panels": [
         {
-          "id": 1, "type": "timeseries",
-          "title": "Who holds the arena slot (running workers)",
+          "id": 1, "type": "state-timeline",
+          "title": "Arena slot ownership (one slot, one node — by design)",
+          "description": "The demo pins all workers to one node and sizes CPU requests so only ONE worker fits. Whoever shows 'running' here owns the cluster's demo compute; focus switches are the hand-offs between rows.",
           "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
           "datasource": "Prometheus",
-          "fieldConfig": {"defaults": {"custom": {"fillOpacity": 30}, "min": 0, "max": 1}},
+          "options": {"showValue": "never", "rowHeight": 0.75, "legend": {"displayMode": "list", "placement": "bottom"}},
+          "fieldConfig": {
+            "defaults": {
+              "custom": {"fillOpacity": 80, "lineWidth": 0},
+              "mappings": [
+                {"type": "value", "options": {
+                  "0": {"text": "", "color": "transparent", "index": 0},
+                  "1": {"text": "running", "color": "green", "index": 1}
+                }}
+              ],
+              "max": 1, "min": 0
+            },
+            "overrides": [
+              {"matcher": {"id": "byName", "options": "task B — crunch"},
+               "properties": [{"id": "mappings", "value": [
+                 {"type": "value", "options": {
+                   "0": {"text": "", "color": "transparent", "index": 0},
+                   "1": {"text": "running", "color": "orange", "index": 1}
+                 }}]}]},
+              {"matcher": {"id": "byName", "options": "task A — refine (medium)"},
+               "properties": [{"id": "mappings", "value": [
+                 {"type": "value", "options": {
+                   "0": {"text": "", "color": "transparent", "index": 0},
+                   "1": {"text": "running", "color": "blue", "index": 1}
+                 }}]}]}
+            ]
+          },
           "targets": [
             {"expr": "sum(kube_pod_status_phase{namespace=\"jobqueue\",phase=\"Running\",pod=~\"transcribe-small-.*\"}) or vector(0)", "legendFormat": "task A — live STT (small)"},
             {"expr": "sum(kube_pod_status_phase{namespace=\"jobqueue\",phase=\"Running\",pod=~\"transcribe-medium-.*\"}) or vector(0)", "legendFormat": "task A — refine (medium)"},
@@ -32,22 +71,28 @@ data:
         },
         {
           "id": 2, "type": "timeseries",
-          "title": "Queue depth per job type",
+          "title": "Queue depth (jobs waiting, per type)",
+          "description": "How much work each task has waiting. A drained queue reads 0 (the exporter itself stops reporting deleted-empty Redis lists; these queries pin the baseline).",
           "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
           "datasource": "Prometheus",
-          "fieldConfig": {"defaults": {"min": 0}},
+          "fieldConfig": {"defaults": {"min": 0, "custom": {"lineInterpolation": "stepAfter", "fillOpacity": 10}}},
           "targets": [
-            {"expr": "redis_key_size{key=~\"jobs:.*\"}", "legendFormat": "{{`{{key}}`}}"}
+            {"expr": "sum(redis_key_size{key=\"jobs:transcribe.small\"}) or vector(0)", "legendFormat": "task A — live STT queue"},
+            {"expr": "sum(redis_key_size{key=\"jobs:transcribe.medium\"}) or vector(0)", "legendFormat": "task A — refinement queue"},
+            {"expr": "sum(redis_key_size{key=\"jobs:crunch\"}) or vector(0)", "legendFormat": "task B — crunch queue"}
           ]
         },
         {
           "id": 3, "type": "timeseries",
           "title": "Chunks evicted (had to run again)",
+          "description": "Steps up when a focus switch (or preemption) kills a running worker; the worker requeues its chunk on the way out, so nothing is lost — just redone.",
           "gridPos": {"x": 0, "y": 8, "w": 8, "h": 8},
           "datasource": "Prometheus",
-          "fieldConfig": {"defaults": {"min": 0}},
+          "fieldConfig": {"defaults": {"min": 0, "custom": {"lineInterpolation": "stepAfter"}}},
           "targets": [
-            {"expr": "redis_key_value{key=~\"metrics:evicted:.*\"}", "legendFormat": "{{`{{key}}`}}"}
+            {"expr": "sum(redis_key_value{key=\"metrics:evicted:transcribe.small\"}) or vector(0)", "legendFormat": "task A — live STT"},
+            {"expr": "sum(redis_key_value{key=\"metrics:evicted:transcribe.medium\"}) or vector(0)", "legendFormat": "task A — refine"},
+            {"expr": "sum(redis_key_value{key=\"metrics:evicted:crunch\"}) or vector(0)", "legendFormat": "task B — crunch"}
           ]
         },
         {
@@ -55,19 +100,22 @@ data:
           "title": "Chunks completed",
           "gridPos": {"x": 8, "y": 8, "w": 8, "h": 8},
           "datasource": "Prometheus",
-          "fieldConfig": {"defaults": {"min": 0}},
+          "fieldConfig": {"defaults": {"min": 0, "custom": {"lineInterpolation": "stepAfter"}}},
           "targets": [
-            {"expr": "redis_key_value{key=~\"metrics:completed:.*\"}", "legendFormat": "{{`{{key}}`}}"}
+            {"expr": "sum(redis_key_value{key=\"metrics:completed:transcribe.small\"}) or vector(0)", "legendFormat": "task A — live STT"},
+            {"expr": "sum(redis_key_value{key=\"metrics:completed:transcribe.medium\"}) or vector(0)", "legendFormat": "task A — refine"},
+            {"expr": "sum(redis_key_value{key=\"metrics:completed:crunch\"}) or vector(0)", "legendFormat": "task B — crunch"}
           ]
         },
         {
           "id": 5, "type": "timeseries",
-          "title": "Where demo workers run (node)",
+          "title": "Running demo workers per node",
+          "description": "Counts only Running pods (Pending pods have no node yet and completed job history lingers — both are excluded). Expect a single line pinned at the arena node, at most 1.",
           "gridPos": {"x": 16, "y": 8, "w": 8, "h": 8},
           "datasource": "Prometheus",
-          "fieldConfig": {"defaults": {"min": 0}},
+          "fieldConfig": {"defaults": {"min": 0, "custom": {"lineInterpolation": "stepAfter", "fillOpacity": 20}}},
           "targets": [
-            {"expr": "sum by (node) (kube_pod_info{namespace=\"jobqueue\",pod=~\"(transcribe|crunch)-.*\"})", "legendFormat": "{{`{{node}}`}}"}
+            {"expr": "sum by (node) (kube_pod_info{namespace=\"jobqueue\",pod=~\"(transcribe|crunch)-.*\"} and on(namespace,pod) (kube_pod_status_phase{namespace=\"jobqueue\",phase=\"Running\"} == 1))", "legendFormat": "{{`{{node}}`}}"}
           ]
         }
       ],
