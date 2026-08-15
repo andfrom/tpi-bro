@@ -30,15 +30,28 @@ Motivated by the 2026-08-15 incident: a runaway `rknn_init` kernel-wedged
 node1 (ping alive, sshd/API dead, OOM killer stuck) and only a manual BMC
 power-cycle recovered it. Design as independent layers:
 
-1. **On-SoC hardware watchdog (first line, cheapest).** The RK1 has the
-   Synopsys watchdog (`watchdog@feaf0000`, `CONFIG_DW_WATCHDOG=y`) but the
-   device-tree node is `status = "disabled"` — enable via DT overlay, then
-   set `RuntimeWatchdogSec=60` in systemd so PID1 pets it. A starved PID1
-   (exactly the observed wedge) then hard-resets the SoC with no external
-   help. Add `kernel.panic=10` + `kernel.panic_on_oops=1` sysctls.
-   Acceptance test: deliberate hang via `echo c > /proc/sysrq-trigger`,
-   node must self-reset. Verify the overlay survives kernel updates.
-2. **BMC-resident watchdog daemon (outer loop).** The BMC is the only
+1. **On-SoC hardware watchdog (first line, cheapest).** ✅ **DONE
+   (2026-08-15)** — `scripts/enable-hw-watchdog.sh` (idempotent, all
+   nodes; `--verify` mode). DT overlay `/boot/overlays/enable-wdt.dtbo`
+   flips `watchdog@feaf0000` to `okay`, wired via `u-boot-update`'s
+   overlay support (`U_BOOT_FDT_OVERLAYS_DIR="/boot/overlays"` — must be
+   the rootfs-absolute path; this build never sets `_BOOT_PATH`, and the
+   dir is not kernel-versioned so it survives kernel updates). systemd
+   `RuntimeWatchdogSec=60` + `RebootWatchdogSec=10min`; sysctls
+   `kernel.panic=10`, `kernel.panic_on_oops=1`. **Acceptance test passed
+   on node3: `echo c > /proc/sysrq-trigger` (hard kernel crash) →
+   self-recovered in 50 s** with no BMC involvement — yesterday's wedge
+   class, which previously needed a manual power-cycle, now self-heals.
+   systemd log line to look for: `Using hardware watchdog 'Synopsys
+   DesignWare Watchdog', device /dev/watchdog0`.
+2. **BMC-resident watchdog daemon (outer loop).** Live datapoint for why
+   this layer is not optional (2026-08-15): during the layer-1 rollout,
+   node2's warm reboot hit flaky PCIe link training — NVMe absent, network
+   never came up, but the system booted "healthy" to a login prompt. The
+   on-SoC watchdog is useless there (PID1 pets it happily); only an
+   external prober sees "alive but unreachable." Recovery was a BMC cold
+   cycle, diagnosed via `tpi uart -n 2 get` (see
+   `HARDWARE-FIRMWARE-ISSUES.md`). The BMC is the only
    always-on vantage that survives all four nodes hanging. Small script:
    probe each node (ICMP + TCP/22 banner — the measured wedge signature is
    "ping OK, banner timeout"), and after M consecutive failures over ≥5
