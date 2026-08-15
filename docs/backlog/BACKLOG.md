@@ -119,23 +119,22 @@ by an E-04 test scenario below).
 
 ### E-01: Deploy KEDA + Redis job queue
 
-**Status:** TODO
-
-Deploy KEDA via Helm in the `keda` namespace. Deploy a single Redis instance
-(lightweight, `redis:7-alpine`) as the shared job queue. One Redis list key per
-workload type; KEDA `ScaledJob` per workload type watching its key.
-
-```bash
-helm repo add kedacore https://kedacore.github.io/charts
-helm install keda kedacore/keda --namespace keda --create-namespace
-```
-
-Redis can share the `monitoring` namespace or get its own. PVC on `local-ssd`
-for persistence across pod restarts (job queue must survive Redis restarts).
+**Status:** DONE 2026-08-15 — kept here (contra the finished-items
+convention) only because three items below reference it as their blocker;
+remove once those reference the artifacts instead. Delivered: KEDA in
+`keda`, Redis (`redis:7-alpine`, `requirepass`, appendonly, PVC on
+`local-ssd`, `interactive` priority band) in `jobqueue` via
+`charts/jobqueue`, one list key per job type + one `ScaledJob` per type,
+demo `echo` type as the contract's reference implementation, and
+`tests/check-cluster.sh` C19 asserting the full enqueue → scale-from-zero →
+result roundtrip. Contract (envelope, results, at-most-once semantics, and
+the producer obligation that all work be chunked/interruptible):
+**ADR-0029**. Install/verify: `scripts/install-jobqueue.sh` (also a
+`bootstrap-operational.sh` stage).
 
 ### E-03: Interruptible workload eviction init container
 
-**Status:** TODO — [BLOCKED on E-01]
+**Status:** TODO — unblocked (E-01 done)
 
 Implement the step-2 eviction logic from ADR-0022 as a reusable init container
 image in tagx. The init container:
@@ -149,7 +148,7 @@ ServiceAccount bound to it, scoped per namespace. Add to the whisper chart
 
 ### E-04: Affinity scheduling validation
 
-**Status:** TODO — [BLOCKED on E-01 (KEDA + Redis), E-02 (capability labels, done)]
+**Status:** TODO — unblocked (E-01 done, E-02 done)
 
 Dedicated test pass for the model affinity scheduling behaviour described in
 ADR-0027. Specific test scenarios are defined (tracked separately by owner);
@@ -188,7 +187,7 @@ times for warm vs. cold placement.
 
 ### E-05: Orchestrator state management — single query model
 
-**Status:** TODO — [BLOCKED on E-01, E-02 (done)]
+**Status:** TODO — unblocked (E-01 done, E-02 done)
 
 The dispatcher that implements ADR-0026 (parallel dispatch) and ADR-0027
 (affinity) needs to know — at dispatch time — which nodes are capable, which are

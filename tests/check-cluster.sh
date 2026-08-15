@@ -321,6 +321,27 @@ else
   skip "C18 tailscale-node-mesh" "tailscale CLI not found on this machine"
 fi
 
+# ── C19: job queue (E-01, the ADR-0028 boundary) ──────────────────────────────
+
+if ! kubectl get scaledjob echo -n jobqueue &>/dev/null; then
+  skip "C19 jobqueue-echo-roundtrip" "job queue not deployed (E-01) — run scripts/install-jobqueue.sh"
+elif [[ $QUICK -eq 1 ]]; then
+  jq_pod=$(kubectl get pod -n jobqueue -l app=jobqueue -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [[ -n "$jq_pod" ]] && kubectl exec -n jobqueue "$jq_pod" -- \
+       sh -c 'redis-cli --no-auth-warning -a "$REDIS_PASSWORD" ping' 2>/dev/null | grep -q PONG; then
+    pass "C19 jobqueue-redis-ping (quick mode — full roundtrip skipped)"
+  else
+    fail "C19 jobqueue-redis-ping" "redis not answering PING in namespace jobqueue"
+  fi
+else
+  if ./scripts/install-jobqueue.sh --verify &>/dev/null; then
+    pass "C19 jobqueue-echo-roundtrip (enqueue → KEDA scale-from-zero → result)"
+  else
+    fail "C19 jobqueue-echo-roundtrip" \
+      "echo job did not complete — check: kubectl get scaledjob,jobs -n jobqueue"
+  fi
+fi
+
 # ── summary ───────────────────────────────────────────────────────────────────
 
 echo ""

@@ -1,0 +1,36 @@
+image:
+  repository: redis
+  tag: "7-alpine"
+  pullPolicy: IfNotPresent
+
+# Existing Secret with a `password` key (created by scripts/install-jobqueue.sh
+# from ~/.turingpi/credentials.kv REDIS_PASSWORD). Used for requirepass, the
+# probes, KEDA's TriggerAuthentication, and the demo worker.
+auth:
+  secretName: jobqueue-redis-auth
+
+persistence:
+  size: 1Gi
+  storageClass: local-ssd
+
+service:
+  port: 6379
+
+# The queue is infrastructure other things depend on — protect it from
+# focus-switch eviction with the high band (see the E-track band-rotation
+# principle in docs/backlog/BACKLOG.md).
+priorityClassName: interactive
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    memory: "512Mi"
+
+# Demo `echo` job type: pops one job from jobs:echo, writes result:<id>.
+# The living example of the ADR-0029 contract — new job types copy this.
+demo:
+  enabled: true
+  # How long echo results live in Redis (seconds).
+  resultTtl: 3600

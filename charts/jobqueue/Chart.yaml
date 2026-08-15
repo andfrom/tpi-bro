@@ -1,0 +1,10 @@
+apiVersion: v2
+name: jobqueue
+description: >-
+  Redis job queue — the cluster's sole external boundary (ADR-0028) — plus
+  the KEDA TriggerAuthentication and a demo `echo` ScaledJob showing the
+  ADR-0029 job contract. Requires KEDA to be installed first
+  (scripts/install-jobqueue.sh handles both).
+type: application
+version: 0.1.0
+appVersion: "7"

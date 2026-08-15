@@ -31,6 +31,8 @@
 #   D01_ollama          — Ollama per NVMe node (+ model pull if OLLAMA_MODEL
 #                         is set in the config file)
 #   D04_monitoring      — kube-prometheus-stack; Grafana exposed on Tailnet
+#   E01_jobqueue        — KEDA + Redis job queue + echo demo (the ADR-0028
+#                         boundary; REDIS_PASSWORD auto-generated on first run)
 #   VERIFY_cluster      — tests/check-cluster.sh; green here == operational
 #
 # Credentials consumed (from ~/.turingpi/credentials.kv):
@@ -79,6 +81,7 @@ STAGES=(
   B04_gitops
   D01_ollama
   D04_monitoring
+  E01_jobqueue
   VERIFY_cluster
 )
 
@@ -239,6 +242,13 @@ do_D04_monitoring() {
   # not the bootstrap config — its default is already ~/.turingpi/credentials.kv.
   run_stage D04_monitoring \
     bash "${SCRIPT_DIR}/install-monitoring.sh" "${DRY_FLAG[@]}"
+}
+
+do_E01_jobqueue() {
+  # Generates REDIS_PASSWORD into credentials.kv on first run — nothing to
+  # preflight for this stage.
+  run_stage E01_jobqueue \
+    bash "${SCRIPT_DIR}/install-jobqueue.sh" "${DRY_FLAG[@]}"
 }
 
 do_VERIFY_cluster() {

@@ -1,0 +1,75 @@
+# KEDA-side objects: how ScaledJobs authenticate to the queue, plus the demo
+# `echo` job type. Requires the KEDA CRDs (scripts/install-jobqueue.sh
+# installs KEDA before this chart).
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ .Release.Name }}-redis-trigger-auth
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: {{ .Values.auth.secretName }}
+      key: password
+{{- if .Values.demo.enabled }}
+---
+# Demo `echo` ScaledJob — the living example of the ADR-0029 job contract.
+# Producer:  LPUSH jobs:echo '{"id":"<unique>","payload":{...}}'
+# Worker:    RPOP one job, SET result:<id> '{"ok":true,...}' EX <ttl>, exit.
+# KEDA scales Jobs from zero while jobs:echo is non-empty.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: echo
+spec:
+  pollingInterval: 5
+  maxReplicaCount: 2
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTargetRef:
+    backoffLimit: 1
+    template:
+      metadata:
+        labels:
+          app: echo-worker
+          tpi-bro/interruptible: "true"
+      spec:
+        restartPolicy: Never
+        priorityClassName: background
+        containers:
+          - name: worker
+            image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+            imagePullPolicy: {{ .Values.image.pullPolicy }}
+            env:
+              - name: REDIS_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Values.auth.secretName }}
+                    key: password
+              - name: REDIS_HOST
+                value: "{{ .Release.Name }}.{{ .Release.Namespace }}.svc.cluster.local"
+            command:
+              - sh
+              - -c
+              - |
+                r() { redis-cli --no-auth-warning -h "$REDIS_HOST" -a "$REDIS_PASSWORD" "$@"; }
+                ITEM=$(r RPOP jobs:echo)
+                # Empty pop is normal (another worker won the race) — succeed quietly.
+                [ -z "$ITEM" ] && exit 0
+                ID=$(printf '%s' "$ITEM" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+                [ -z "$ID" ] && ID="malformed-$(date +%s)"
+                r SET "result:$ID" "{\"ok\":true,\"type\":\"echo\",\"echo\":$ITEM}" EX {{ .Values.demo.resultTtl }}
+            resources:
+              requests:
+                cpu: "50m"
+                memory: "32Mi"
+              limits:
+                memory: "128Mi"
+  triggers:
+    - type: redis
+      metadata:
+        address: "{{ .Release.Name }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}"
+        listName: jobs:echo
+        listLength: "1"
+      authenticationRef:
+        name: {{ .Release.Name }}-redis-trigger-auth
+{{- end }}

@@ -1,0 +1,19 @@
+Job queue deployed (ADR-0028 boundary; contract: ADR-0029).
+
+Redis (auth from secret '{{ .Values.auth.secretName }}'):
+  {{ .Release.Name }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+  (reachable off-cluster via the Tailscale subnet-routed ClusterIP)
+
+{{- if .Values.demo.enabled }}
+
+Try the demo echo job type end-to-end:
+  POD=$(kubectl get pod -n {{ .Release.Namespace }} -l app={{ .Release.Name }} -o name | head -1)
+  kubectl exec -n {{ .Release.Namespace }} $POD -- \
+    sh -c 'redis-cli --no-auth-warning -a "$REDIS_PASSWORD" LPUSH jobs:echo "{\"id\":\"demo-1\",\"payload\":{\"msg\":\"hello\"}}"'
+  # KEDA scales an echo Job from zero within ~5s; then:
+  kubectl exec -n {{ .Release.Namespace }} $POD -- \
+    sh -c 'redis-cli --no-auth-warning -a "$REDIS_PASSWORD" GET result:demo-1'
+{{- end }}
+
+Verify the full roundtrip any time:
+  ./scripts/install-jobqueue.sh --verify
