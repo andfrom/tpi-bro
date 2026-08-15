@@ -119,6 +119,11 @@ guarded_cycle() { # node reason at_threshold
   return 0
 }
 
+# Everything below is the live loop; tests source this file with
+# BMC_WATCHDOG_TEST=1 to get the functions above without side effects
+# (see tests/check-bmc-watchdog-logic.sh).
+if [ "${BMC_WATCHDOG_TEST:-0}" != "1" ]; then
+
 log "START interval=${INTERVAL}s ssh=${FAIL_THRESHOLD}x/${BOOT_GRACE}s deep=${DEEP_THRESHOLD}x/${DEEP_GRACE}s cooldown=${COOLDOWN}s max/day=${MAX_CYCLES_PER_DAY}"
 
 start_ts=$(now)
@@ -195,3 +200,5 @@ while true; do
   done
   sleep "$INTERVAL"
 done
+
+fi

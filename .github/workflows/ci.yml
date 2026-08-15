@@ -37,41 +37,79 @@ jobs:
       - name: Install helm
         run: curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-      - name: shellcheck — Phase A helper
-        run: shellcheck --severity=warning scripts/bootstrap-host-helper.sh
-
-      - name: shellcheck — Phase B scripts
+      # Globbed, not enumerated: a hand-maintained allowlist silently drifts
+      # as scripts are added (it did — 10+ scripts were uncovered when this
+      # was an explicit list).
+      - name: bash syntax — all shell scripts
         run: |
-          shellcheck --severity=warning \
-            scripts/bootstrap-phase-b.sh \
-            scripts/setup-static-ips.sh \
-            scripts/setup-ssh-keys.sh \
-            scripts/install-k3s.sh \
-            scripts/gen-registry-certs.sh \
-            scripts/install-ca.sh \
-            scripts/setup-registry.sh \
-            scripts/mount-ssd.sh \
-            scripts/install-ollama.sh \
-            scripts/install-tailscale.sh \
-            scripts/setup-subnet-router.sh \
-            scripts/setup-tailscale-operator.sh \
-            scripts/install-monitoring.sh \
-            scripts/apply-resource-policy.sh
+          for f in scripts/*.sh tests/*.sh hooks/*; do bash -n "$f"; done
+          for f in scripts/bmc/*; do sh -n "$f"; done
 
-      - name: shellcheck — test runners
-        run: shellcheck --severity=warning tests/run-ci.sh tests/run-hardware.sh tests/check-cluster.sh
+      - name: shellcheck — all bash scripts (globbed)
+        run: shellcheck --severity=warning scripts/*.sh tests/*.sh hooks/pre-commit
 
-      - name: helm lint — registry chart
-        run: helm lint charts/registry/
+      - name: shellcheck — BMC scripts (BusyBox/POSIX target)
+        run: shellcheck --severity=warning -s sh scripts/bmc/*
 
-      - name: helm template — registry chart (verify render)
-        run: helm template test-release charts/registry/ > /dev/null
+      - name: Suite 6 — BMC watchdog guard logic (no hardware)
+        run: ./tests/check-bmc-watchdog-logic.sh
 
-      - name: helm lint — ollama chart
-        run: helm lint charts/ollama/ --set nodeName=rk1-node1
+      - name: expect smoke — both .exp scripts parse end-to-end via --help
+        run: |
+          sudo apt-get install -y expect
+          ./scripts/bootstrap-turingpi-cluster.exp --help > /dev/null
+          ./scripts/teardown-cluster.exp --help > /dev/null
 
-      - name: helm template — ollama chart (verify render)
-        run: helm template ollama-node1 charts/ollama/ --set nodeName=rk1-node1 > /dev/null
+      - name: markdown internal links resolve
+        run: |
+          fail=0
+          while IFS=: read -r f l link; do
+            tgt="${link%%#*}"
+            [ -z "$tgt" ] && continue
+            case "$tgt" in http*|mailto:*) continue;; esac
+            if [ ! -e "$(dirname "$f")/$tgt" ]; then
+              echo "BROKEN: $f:$l -> $link"; fail=1
+            fi
+          done < <(grep -rnoE '\]\(([^)]+)\)' README.md CONTRIBUTING.md docs/ gitops/README.md | sed 's/](\(.*\))/\1/' | awk -F: '{print $1":"$2":"$3}')
+          exit $fail
+
+      - name: helm lint — all charts
+        run: |
+          helm lint charts/registry/
+          helm lint charts/ollama/ --set nodeName=rk1-node1
+          helm lint charts/jobqueue/
+          helm lint charts/focusdemo/
+          helm lint charts/whisper/ --set audio.claimName=c --set audio.filePath=f.wav
+
+      - name: helm template — render matrix (all charts, all whisper paths)
+        run: |
+          helm template test charts/registry/ > /dev/null
+          helm template test charts/ollama/ --set nodeName=rk1-node1 > /dev/null
+          helm template test charts/jobqueue/ > /dev/null
+          helm template test charts/focusdemo/ > /dev/null
+          # whisper: CPU, RKNN naive, RKNN sa-kv
+          helm template test charts/whisper/ \
+            --set audio.claimName=c --set audio.filePath=f.wav > /dev/null
+          helm template test charts/whisper/ \
+            --set audio.claimName=c --set audio.filePath=f.wav \
+            --set rknn.enabled=true --set language=sv > /dev/null
+          helm template test charts/whisper/ \
+            --set audio.claimName=c --set audio.filePath=f.wav \
+            --set rknn.enabled=true --set rknn.decoder=sa-kv --set language=sv > /dev/null
+
+      - name: helm template — negative matrix (fail-fast guards must fire)
+        run: |
+          set -e
+          # each of these MUST fail to render
+          ! helm template test charts/whisper/ --set audio.filePath=f.wav > /dev/null 2>&1
+          ! helm template test charts/whisper/ \
+              --set audio.claimName=c --set audio.filePath=f.wav \
+              --set rknn.enabled=true --set language=auto > /dev/null 2>&1
+          ! helm template test charts/whisper/ \
+              --set audio.claimName=c --set audio.filePath=f.wav \
+              --set rknn.enabled=true --set rknn.decoder=bogus --set language=sv > /dev/null 2>&1
+          ! helm template test charts/ollama/ > /dev/null 2>&1
+          echo "all 4 guards fired"
 
       - name: helm repo — prometheus-community (for monitoring values)
         run: |

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Run shellcheck on any staged .sh files before committing.
+# Enable with:  git config core.hooksPath hooks
+# (CI enforces the same check on every push, so skipping this only moves
+# the failure later.)
+set -euo pipefail
+
+staged=$(git diff --cached --name-only --diff-filter=ACM | grep '\.sh$' || true)
+[[ -z "$staged" ]] && exit 0
+
+if ! command -v shellcheck &>/dev/null; then
+  echo "pre-commit: shellcheck not found — skipping (install with: sudo apt install shellcheck)"
+  exit 0
+fi
+
+echo "pre-commit: shellcheck on staged shell scripts…"
+# shellcheck disable=SC2086
+shellcheck --severity=warning $staged

@@ -11,7 +11,7 @@ flaky PCIe link training (booted "healthy", NVMe absent, never reachable).
 | Layer | Catches | Mechanism | Validated by |
 |---|---|---|---|
 | 1. On-SoC hardware watchdog | Kernel starvation/hang (PID1 can't pet) | Synopsys DW watchdog + systemd `RuntimeWatchdogSec=60`; `kernel.panic=10`, `panic_on_oops=1` | sysrq-forced kernel crash on node3 → self-reset in **50 s**, no BMC |
-| 2. BMC watchdog, ssh track | Node unreachable (wedge, dead boot, net down) | BMC daemon probes TCP/22 for an `SSH-2.0` banner; power-cycles after guards | sshd stopped on node4 → autonomous `WEDGED` → cycle → back, cluster 15/0 |
+| 2. BMC watchdog, ssh track | Node unreachable (wedge, dead boot, net down) | BMC daemon probes TCP/22 for an `SSH-2.0` banner; power-cycles after guards | sshd stopped on node4 → autonomous `WEDGED` → cycle → back, cluster 15/0; guard logic (cooldown/give-up/cap) unit-tested in CI (`tests/check-bmc-watchdog-logic.sh`) |
 | 3. Workload layer | Lost/evicted work | Queue contract (ADR-0029): SIGTERM-trap requeue for graceful eviction; producers re-enqueue on result-TTL timeout for hard kills | Real node power-cycles: 15/0 quick suite, zero manual repair |
 | 4. Deep probe + alerts | "Healthy but hollow" (booted, ssh fine, NVMe absent) | BMC daemon checks node-exporter for `/mnt/ssd` on NVMe nodes → cold cycle (the PCIe-flake fix); PrometheusRule mirrors it in Grafana | Deep probe smoke-tested from the BMC; alert rule Flux-synced |
 
@@ -52,7 +52,9 @@ A power-cycle happens only when ALL guards pass: BMC reports the node On
 (a deliberately-off node is never touched), threshold consecutive failures
 (production: 10 × 30 s = 5 min), boot grace expired, 30 min per-node
 cooldown, and < 3 cycles in 24 h — after which it logs `GIVE-UP` and leaves
-the node down for a human. No boot loops by construction.
+the node down for a human. No boot loops by construction — a claim pinned
+by unit tests (Suite 6, `tests/check-bmc-watchdog-logic.sh`, runs in CI
+with a stubbed clock and `tpi`).
 
 Log: `/mnt/sdcard/bmc-watchdog.log` on the BMC (persistent). Lines to know:
 `FAIL`/`DEEP-FAIL` (first failure), `WEDGED`/`DEEP-WEDGED` (threshold, will

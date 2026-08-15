@@ -14,6 +14,9 @@ full job-queue roundtrip (enqueue → KEDA scale-from-zero → result).
 `tests/check-scheduling.sh` (Suite 5) validates the band-rotation scheduling
 behavior live: equal-band inertness, 4-switch focus ping-pong with pinned
 priority values, and background-progress-on-slack.
+`tests/check-bmc-watchdog-logic.sh` (Suite 6) unit-tests the BMC watchdog's
+cycle guards (cooldown, give-up cap, probe parsers) with stubbed clock/tpi —
+no hardware, runs in CI.
 
 **Coverage note:** Suites 1–3 cover Phase A (bootstrap) only. Phase B shell
 scripts and Helm charts are validated by Suites 4–5 (manual, require a running

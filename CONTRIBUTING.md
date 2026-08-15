@@ -43,9 +43,10 @@ kept visible rather than erased. Contributions follow the same bar:
 
 ## Practicalities
 
-- **Shell scripts must pass `shellcheck`** — the pre-commit hook runs it
-  on staged scripts. BusyBox-targeted scripts (`scripts/bmc/`) must stay
-  POSIX sh.
+- **Shell scripts must pass `shellcheck`** — CI enforces it on every
+  push, and a pre-commit hook is provided: enable it once with
+  `git config core.hooksPath hooks`. BusyBox-targeted scripts
+  (`scripts/bmc/`) must stay POSIX sh (`shellcheck -s sh`).
 - **Tests**: `tests/check-cluster.sh` (19 live checks) must stay green on
   real hardware for cluster-affecting changes; `tests/check-scheduling.sh`
   covers the priority/eviction behavior. Say in the PR which suites you

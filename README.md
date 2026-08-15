@@ -46,8 +46,8 @@ your own scripts want to enqueue. The architecture and rationale live in
 [ADR-0028](docs/adr/ADR-0028-job-queue-as-sole-external-boundary.md) and
 [ADR-0022](docs/adr/ADR-0022-event-driven-scheduling-and-interruptible-workloads.md);
 the contract itself is
-[ADR-0029](docs/adr/ADR-0029-job-queue-contract-v1.md), and the build-out
-is tracked as E-01–E-06 in [the backlog](docs/backlog/BACKLOG.md).
+[ADR-0029](docs/adr/ADR-0029-job-queue-contract-v1.md), and the remaining build-out
+is tracked as the E-track in [the backlog](docs/backlog/BACKLOG.md).
 
 **See it happen:** [docs/FOCUS-DEMO.md](docs/FOCUS-DEMO.md) runs two
 competing tasks — tiered near-realtime speech transcription vs. a chunked
@@ -64,7 +64,7 @@ development: a kernel-starved node (a runaway NPU-runtime allocation ate
 all 32 GB — the on-SoC hardware watchdog now resets that in **~50 s**), a
 node that hangs unreachable (a BMC-resident watchdog probes every node's
 ssh banner and cold power-cycles after guarded thresholds — no boot loops
-by construction), and the sneakiest one: a node that boots "healthy" with
+by construction, a claim pinned by CI unit tests), and the sneakiest one: a node that boots "healthy" with
 its NVMe missing after a warm reboot's PCIe link-training flake (a deep
 probe via node-exporter catches it; a cold cycle is exactly the fix, and a
 Prometheus alert fires if the watchdog ever gives up). Layers 1 and 2 were
