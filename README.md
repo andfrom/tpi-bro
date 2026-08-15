@@ -27,6 +27,27 @@ experience-based rundown — measured performance, what actually works today
 (real-time NPU transcription, anything GPU-shaped), and the real roadblocks
 hit building this.
 
+## What the cluster is *for*: a queue-fronted execution tier
+
+Beyond the bring-up itself, tpi-bro is heading somewhere specific: a cluster
+you hand work to through a **typed job queue**, and that handles everything
+behind it — scale-from-zero per job type, capability-based placement (NPU,
+NVMe), warm-model affinity, and priority-based eviction of work that no
+longer matters. Push a job; the right container runs on the right node; the
+cluster scales back to zero when the work is done.
+
+The queue is the *entire* integration surface — no producer ever touches
+Kubernetes, and the cluster never knows what sits upstream. That makes it
+equally usable as the execution tier of a focus-following personal
+automation system (the design driver: supporting work switches when your
+attention does, with close-to-live audio transcription as one trigger
+pathway), or simply as a small, low-power processing machine for whatever
+your own scripts want to enqueue. The architecture and rationale live in
+[ADR-0028](docs/adr/ADR-0028-job-queue-as-sole-external-boundary.md) and
+[ADR-0022](docs/adr/ADR-0022-event-driven-scheduling-and-interruptible-workloads.md);
+the build-out is tracked as E-01–E-06 in
+[the backlog](docs/backlog/BACKLOG.md).
+
 ## Getting started
 
 **→ [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) is the full installation walkthrough** — hardware assembly, prerequisites, Phase A (flash/name/network), Phase B (k3s/registry/storage), Tailscale, and populating the registry with application images. Start there.

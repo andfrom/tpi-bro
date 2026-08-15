@@ -95,6 +95,12 @@ Currently untested. Document gaps once hardware is available.
 
 ## Event-Driven Scheduling (ADR-0022)
 
+Per ADR-0028, this track is more than internal plumbing: the typed job
+queue built here is the **sole boundary** between this cluster and any
+external orchestrator or producer — the property that makes the cluster
+usable as a decoupled, general execution tier. E-01 is therefore the head
+of the whole track (and follows the bring-up orchestrator in sequencing).
+
 ### E-01: Deploy KEDA + Redis job queue
 
 **Status:** TODO
