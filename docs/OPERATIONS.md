@@ -170,7 +170,7 @@ Re-run `./scripts/setup-registry.sh --ca-only` after changing the password to pu
 
 All three NVMe nodes are labeled `storage.tpi-bro/nvme=true`. Workloads express storage requirements as a capability (`storageClassName: local-ssd`) rather than a hostname pin — k3s schedules dynamically to any SSD-capable node via `WaitForFirstConsumer` binding. See `adr/ADR-0019-storage-architecture.md`.
 
-Registry PVC `registry-data` is on `local-ssd` (node1, co-located with HostPort 5000). The HostPort-forced node1 pin is temporary; will be removed when MetalLB is in place (C-01).
+Registry PVC `registry-data` is on `local-ssd` (node1, co-located with HostPort 5000). The HostPort node1 pin is permanent in practice: the registry's local-SSD PVC ties it to node1 regardless of what IP fronts it (MetalLB was evaluated and dropped 2026-08-15 — see ROADMAP/backlog C-01).
 
 ## Known Issues
 

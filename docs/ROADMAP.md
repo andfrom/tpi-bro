@@ -16,7 +16,7 @@ Complete. Usage: `docs/GETTING-STARTED.md`, `./scripts/bootstrap-turingpi-cluste
 
 ## Phase B — k3s + Persistent Registry
 
-Complete through B4-gitops. Open: **B5-metallb** (stable registry VIP, removes the HostPort-forced node1 pin — see `backlog/BACKLOG.md`).
+Complete through B4-gitops. (B5-metallb was dropped 2026-08-15: every job it would do is already covered or moot — service exposure is the Tailscale operator's, the registry is pinned to node1 by its *storage* regardless of any VIP, node IPs are already static, and the ADR-0028 queue boundary rides the Tailscale-routed ClusterIP. Revisit only per the note in backlog C-01.)
 
 ### Running Phase B (orchestrated)
 
@@ -95,7 +95,6 @@ Whisper `medium` inference on the RK3588 NPU already works (see `docs/NPU-MODELS
 ## Immediate Next Steps
 
 1. **large-v3 RKNN conversion** — next model in priority table after medium validated (now including its SA-KV shim decoder; see `docs/RKNN-SA-KV-DECODER-BUG.md`).
-2. **B5-metallb** — stable registry VIP; removes the HostPort-forced node1 pin.
 
 (W-03 KV-cache decoder: done 2026-08-14 — root-caused, fixed via the input
 shim, productionized into `charts/whisper/` at ~2.5× the naive decoder.

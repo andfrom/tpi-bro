@@ -12,7 +12,9 @@ TODO list.
 
 ### C-01: IP resilience for registry
 **Status:** TODO  
-Handle the case where `rk1-node1`'s DHCP lease changes. Options: static IP reservation on router, or CoreDNS custom entry in k3s.
+Handle the case where `rk1-node1`'s DHCP lease changes. Options: static IP reservation on router, or CoreDNS custom entry in k3s. Largely mitigated already: the bootstrap configures static node IPs and everything laptop-side resolves by hostname.
+
+Note (2026-08-15): **B-05/MetalLB was dropped** rather than being the answer here. Every job it would do is covered or moot on this cluster — service exposure belongs to the Tailscale operator, the registry is pinned to node1 by its local-SSD *storage* regardless of any VIP, node IPs are static, and the ADR-0028 queue boundary rides the Tailscale-routed ClusterIP. Revisit a LoadBalancer only if the registry ever gets node-independent storage or a non-Tailnet consumer appears.
 
 ### C-02: Laptop-to-cluster image sync
 **Status:** TODO  
