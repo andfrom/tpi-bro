@@ -6,7 +6,7 @@
 >
 > * **[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)** &nbsp; – &nbsp; the full installation walkthrough: hardware assembly, prerequisites, flashing, and network setup. Start there.
 > * [Initial bootstrap](#initial-board-and-cluster-bootstrap-expect-flashing-and-network-setup) below covers the same ground (Phase A) at a reference level, for extending the scripts rather than following along step-by-step.
-> * [A GitOps workflow](#handoff-from-bootstrap-expect-to-cluster-orchestration-k8sgitops) handles the rest, K8s orchestration, etc.<br>(These are Phases B through D, all the way up to a "Hello, World!" example for a multi-agent setup.)
+> * [A GitOps workflow](#handoff-from-bootstrap-expect-to-cluster-orchestration-k8sgitops) handles the rest, K8s orchestration, etc.<br>(These are Phases B through E — from bare k3s all the way up to the queue-fronted execution tier with a live focus-switching demo.)
 >
 > **Disclaimer**: This project has yet to play with Nvidia Jetson (Orin) Nano and CM4 adapters for RPi, so it's not possible to tell if these scripts and instructions will help anyone to get started for such configurations.
 
@@ -67,9 +67,10 @@ ssh banner and cold power-cycles after guarded thresholds — no boot loops
 by construction), and the sneakiest one: a node that boots "healthy" with
 its NVMe missing after a warm reboot's PCIe link-training flake (a deep
 probe via node-exporter catches it; a cold cycle is exactly the fix, and a
-Prometheus alert fires if the watchdog ever gives up). Every layer was
-validated by deliberately crashing live nodes, and interrupted queue work
-re-enqueues by contract. Details, guards, and the runbook:
+Prometheus alert fires if the watchdog ever gives up). Layers 1 and 2 were
+validated by deliberately crashing/hanging live nodes; the deep probe is
+smoke-tested from the BMC. Interrupted queue work re-enqueues by contract.
+Details, guards, and the runbook:
 [docs/SELF-HEALING.md](docs/SELF-HEALING.md).
 
 ## Getting started
@@ -88,7 +89,8 @@ cp bootstrap-config.kv.example bootstrap-config.kv && $EDITOR bootstrap-config.k
 ./scripts/bootstrap-operational.sh                             # everything else, one command:
                                                                #   k3s, registry, storage, resource
                                                                #   policy, capability labels, Tailscale
-                                                               #   mesh, GitOps, Ollama, monitoring —
+                                                               #   mesh, GitOps, Ollama, monitoring,
+                                                               #   job queue, self-healing watchdogs —
                                                                #   ends with the health check green
 ```
 
@@ -98,7 +100,7 @@ against a built cluster is safe — every stage is idempotent. Prefer smaller
 steps? `./scripts/bootstrap-phase-b.sh` still runs just the Phase B core, and
 each stage's underlying script can be run on its own.
 
-Phase B (k3s + persistent registry + NVMe + Ollama) and Phase D (example agents + monitoring) are complete. See [docs/ROADMAP.md](docs/ROADMAP.md) for current state.
+Phase B (k3s + persistent registry + NVMe + Ollama), Phase D (Ollama + monitoring; agent workloads deliberately stay upstream of the queue), and Phase E (job queue + scheduling) are complete. See [docs/ROADMAP.md](docs/ROADMAP.md) for current state.
 
 ---
 
@@ -128,7 +130,7 @@ Check out the [open backlog](docs/backlog/BACKLOG.md) for open work items and fu
 
 ## Initial board and cluster bootstrap: Expect (flashing and network setup)
 
-This repo contains a resumable, staged [**Expect**](https://core.tcl-lang.org/expect/index) bootstrap for a [Turing Pi](https://turingpi.com/) ([BMC](https://docs.turingpi.com/docs/turing-pi2-bmc-intro-specs)) + 4× [RK1](https://docs.turingpi.com/docs/turing-rk1-specs-and-io-ports) nodes to reach a wanted board bring up "baseline". The "baselines" are categorized into "Phases" with varying degrees of Docker/Kubernetes capabilities up to a working "Hello, World" multi-agent setup example. E.g., "Phase A" contains
+This repo contains a resumable, staged [**Expect**](https://core.tcl-lang.org/expect/index) bootstrap for a [Turing Pi](https://turingpi.com/) ([BMC](https://docs.turingpi.com/docs/turing-pi2-bmc-intro-specs)) + 4× [RK1](https://docs.turingpi.com/docs/turing-rk1-specs-and-io-ports) nodes to reach a wanted board bring up "baseline". The "baselines" are categorized into "Phases" with varying degrees of Docker/Kubernetes capabilities, up to the queue-fronted execution tier described above. E.g., "Phase A" contains
 - Nodes named `rk1-node{1..4}` with a unified password
 - Laptop `/etc/hosts` updated
 - An **ephemeral** (HTTP) Docker registry running on `rk1-node1` with `--restart=always`
@@ -169,7 +171,7 @@ what's in the repo and the stage-by-stage mechanics for anyone extending it.
 | `bmc-manifest.kv.example` | Template for A0 BMC firmware check/upgrade |
 | `tests/run-ci.sh` | CI test runner — Suites 1+2 (Phase A dry-run + mock), no hardware required |
 | `tests/run-hardware.sh` | Hardware test runner — Suite 3, full Phase A cluster cycles |
-| `tests/check-cluster.sh` | Suite 4: 10-check cluster health test (Phase B); `--quick` skips pod-pull checks |
+| `tests/check-cluster.sh` | Suite 4: 19-check cluster health test; `--quick` skips pod-pull + roundtrip checks |
 | `docs/` | PREREQUISITES, TROUBLESHOOTING, and status documents |
 | `docs/adr/` | Architecture Decision Records |
 
@@ -213,7 +215,7 @@ modes, and BMC firmware handling are all covered in
 ```bash
 ./tests/run-ci.sh            # Suite 1 (dry-run) + Suite 2 (mock), no hardware
 ./tests/run-hardware.sh --cycles 2          # bootstrap→teardown cycles on real hardware
-./tests/check-cluster.sh                    # Phase B 10-check cluster health test
+./tests/check-cluster.sh                    # 19-check cluster health test
 ```
 
 The CI suite (dry-run + mock, no hardware) runs automatically on every push/PR.
@@ -334,7 +336,7 @@ Supporting services (API gateway, vector DB, queue, metrics) are stateless or di
 
 | Node | Hostname | Role |
 |------|----------|------|
-| 1 | `rk1-node1` | k3s control plane + example agent |
+| 1 | `rk1-node1` | k3s control plane + registry |
 | 2 | `rk1-node2` | Future LLM agent |
 | 3 | `rk1-node3` | Future LLM agent |
 | 4 | `rk1-node4` | RAG / vector DB / supporting infra |

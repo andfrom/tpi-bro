@@ -44,8 +44,8 @@ transcript out, on both paths:
   first model size that hits real-time (~1×), at "first usable quality" —
   don't expect `large-v3` accuracy in real time on this hardware.
 - **NPU**: the encoder step is genuinely fast — roughly 2× the CPU encoder.
-  The decoder, as currently wired into `charts/whisper/` (no KV cache), is
-  not: our own live test today (`medium` model, RK1 hardware, a 3-second
+  The decoder, as originally wired (no KV cache), was
+  not: our own live test (`medium` model, RK1 hardware, a 3-second
   clip) measured **10.4 s to encode, 55.1 s to decode** (11 tokens, greedy,
   no cache) — much slower than real-time for this exact configuration.
   KV-cache decoder variants fix that: the full self-attention KV-cache
@@ -90,10 +90,9 @@ below).
   open, no maintainer response as of this writing.
 - Run NPU workloads without `--privileged` containers — no clean device
   allowlist exists yet on this SDK/kernel combination; not multi-tenant-safe.
-- Get real-time NPU-accelerated Whisper transcription — CPU currently wins
-  on decode latency, until W-03 lands and is wired into the chart.
-- Autoscale workloads on demand — the event-driven job queue (KEDA + Redis,
-  tracked as E-01) isn't deployed yet; dispatch is manual today.
+- Get real-time NPU-accelerated Whisper transcription — even with the
+  SA-KV decoder wired in (W-03, done), CPU still wins on decode latency;
+  the NPU's edge is the encoder.
 
 ## Roadblocks, from actually doing this
 

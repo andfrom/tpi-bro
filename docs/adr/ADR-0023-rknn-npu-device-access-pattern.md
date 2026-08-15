@@ -32,38 +32,14 @@ the `rknn-toolkit-lite2` pip wheel. It must be provided separately.
 
 ### 1. Container access: `--privileged` (device node now confirmed, but not sufficient alone)
 
-**Update 2026-08-14 — device node confirmed.** Loaded an RKNN model under
-`--privileged` and inspected the process's open fds (`/proc/<pid>/fd`): the
-NPU runtime opens **`/dev/dri/card1`** (major:minor `226:1`), not either
-`renderD128` or `renderD129` — those belong to a separate device entirely
-(`card1`'s udev devpath is `/devices/platform/fdab0000.npu/drm/card1`, i.e.
-the NPU registers its own primary DRM card node, not a render node). The
-"`renderD128` vs `renderD129`" framing in the original decision below was
-the wrong dichotomy.
-
-This does **not** mean dropping `--privileged` is a one-line change, though.
-The vendor runtime's own internal `_check_container` sanity check (inside
-`librknnrt`/`rknnlite`, not something this repo controls) unconditionally
-requires **both** `/dev/dri/renderD129` *and* `/proc/device-tree/compatible`
-to be present and readable, regardless of which device is actually opened at
-runtime. `/proc/device-tree` is a symlink to `/sys/firmware/devicetree/base`,
-and `/sys/firmware` is one of Docker's default **masked paths** for
-unprivileged containers — so reading it requires `--security-opt
-systempaths=unconfined` (or `--privileged`, which disables masking
-entirely) even after supplying `--device=/dev/dri/card1` and
-`--device=/dev/dri/renderD129` explicitly.
-
-Past that point, a **further, unresolved** issue appears: with masking
-disabled but without `--privileged`, `init_runtime()` fails SoC
-auto-detection (`_get_target_soc`) and demands an explicit `target=`; passing
-`target="rk3588"` explicitly then routes into the runtime's
-remote-device/simulator code path instead of local inference and fails with
-`Unsupported run platform: Linux aarch64`. This suggests the closed-source
-runtime reads something else under `/sys` for local auto-detection that
-`systempaths=unconfined` alone doesn't fully replicate (undetermined exactly
-what — the library is a compiled `.so`, no source available). Chasing this
-further is vendor-SDK archaeology with no source to read; **not worth it**
-for a single-tenant batch-compute cluster.
+**Update 2026-08-14 — device node confirmed.** The NPU runtime opens
+**`/dev/dri/card1`** (its own primary DRM card node), not either
+`renderD12x` render node — the "`renderD128` vs `renderD129`" framing in
+the original decision below was the wrong dichotomy. Knowing the device
+does *not* unblock de-privileging: the closed-source runtime additionally
+requires Docker-masked `/sys` paths and fails SoC auto-detection without
+full `--privileged` (investigation details in
+`../HARDWARE-FIRMWARE-ISSUES.md`, first two rows).
 
 **Decision: keep `--privileged` for RKNN workloads.** It reliably works
 end-to-end — validated 2026-08-14 by running the actual `charts/whisper/`
@@ -118,8 +94,8 @@ ls /dev/nvidia* 2>/dev/null && echo "jetson-orin-nano"
 ### 4. No `/dev/rknpu` references in charts or scripts
 
 Do not reference `/dev/rknpu` in any Helm chart device mounts, `--device` flags,
-or bringup scripts. It does not exist on this cluster. Use the DRM render node
-or `--privileged` as above.
+or bringup scripts. It does not exist on this cluster. The real device is
+`/dev/dri/card1`, and `--privileged` remains required as above.
 
 ---
 

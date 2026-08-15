@@ -47,7 +47,7 @@ If multi-tenancy is added later, each user/application gets a Namespace with a R
 
 A LimitRange in each namespace sets default requests/limits for pods that don't specify them, preventing unconstrained pods from starving neighbours.
 
-## Example: sibling-app with 7 agents
+## Example: a 7-agent application
 
 Assume all 7 agents use one Ollama instance on `rk1-node1` running a 7B model (~4–6 GB at 4-bit):
 

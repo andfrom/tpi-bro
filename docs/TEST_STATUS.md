@@ -1,20 +1,25 @@
 # tpi-bro — Test Status & Coverage Map
 
-_Last updated: 2026-06-16_
+_Last updated: 2026-08-16_
 
 ## Current state
 
-**Automated tests implemented.** `tests/run-ci.sh` runs 27 tests (Suites 1 + 2)
+**Automated tests implemented.** `tests/run-ci.sh` runs 31 tests (Suites 1 + 2)
 on every push/PR via GitHub Actions — no hardware required. `tests/run-hardware.sh`
 orchestrates the full cluster-cycle verification (Suite 3) when real hardware is
-available. `tests/check-cluster.sh` (Suite 4) tests a running Phase B cluster: 14
-checks covering node readiness, registry TLS + auth, push/pull, per-node pod pull,
-and NVMe storage.
+available. `tests/check-cluster.sh` (Suite 4) tests a running cluster end to end:
+**19 checks** covering node readiness, registry TLS + auth + push + per-node pod
+pull, NVMe storage, capability labels, PriorityClasses, the Tailscale mesh, and a
+full job-queue roundtrip (enqueue → KEDA scale-from-zero → result).
+`tests/check-scheduling.sh` (Suite 5) validates the band-rotation scheduling
+behavior live: equal-band inertness, 4-switch focus ping-pong with pinned
+priority values, and background-progress-on-slack.
 
-**Coverage note:** Suites 1–3 cover Phase A (bootstrap) only. Phase B shell scripts
-and Helm charts are validated by Suite 4 (manual, requires a running cluster).
-Phase C is not yet implemented. Phase D workloads (Ollama, Agent A, Agent B) are
-validated via `sibling-app`'s own canary test suite (`make canary`).
+**Coverage note:** Suites 1–3 cover Phase A (bootstrap) only. Phase B shell
+scripts and Helm charts are validated by Suites 4–5 (manual, require a running
+cluster) plus the `--verify` modes of the install scripts. Agent workloads are
+deliberately not deployed on this cluster (they live upstream of the job-queue
+boundary, ADR-0028) and are therefore not tested here.
 
 ---
 
@@ -325,10 +330,10 @@ teardown --password <current-pass>
 
 | Path type | Count | Automated? |
 |-----------|-------|-----------|
-| CI dry-run (Suite 1) | 20 | Yes — GitHub Actions on every push/PR |
+| CI dry-run (Suite 1) | 24 (incl. D21–D24 BMC flash-mode: auto-detect, explicit `BMC_SDCARD_DEV`, unknown-type die, missing-manifest die) | Yes — GitHub Actions on every push/PR |
 | Mock / fault-injection (Suite 2) | 7 | Yes — GitHub Actions on every push/PR |
 | Hardware verification (Suite 3) | 4 scenarios | Manual — run before significant merges |
-| **Total automated** | **27** | |
+| **Total automated** | **31** | |
 
 ### Paths not reachable without special tooling
 
@@ -346,46 +351,46 @@ teardown --password <current-pass>
 ### Phase B shell scripts — no unit tests
 
 **Scripts:** `scripts/install-k3s.sh`, `scripts/setup-registry.sh`,
-`scripts/setup-nvme.sh`, and related helpers.
+`scripts/mount-ssd.sh`, and related helpers.
 
 **Why not automated:** these scripts mutate live cluster state (install k3s,
 configure containerd, format NVMe). Dry-run modes are not implemented. The
 existing Suite 4 (`tests/check-cluster.sh`) validates the *result* of a Phase B
-run (14 checks: node readiness, registry TLS, push/pull, NVMe mounts) but does
-not test the scripts themselves.
+run (19 checks) but does not test the scripts themselves.
 
 **Manual validation:**
 ```bash
 # After any change to Phase B scripts, run Suite 4 against a live cluster:
 ./tests/check-cluster.sh
-# Expect: 14/14 checks passing
+# Expect: 19/19 checks passing
 ```
 
 **To improve:** add `--dry-run` flags to Phase B scripts (similar to Phase A's
-Expect scripts) so output-matching tests can run without a real cluster. Add
-shellcheck to CI for static analysis.
+Expect scripts) so output-matching tests can run without a real cluster.
+(shellcheck static analysis is already enforced in CI.)
 
 **Trigger for Suite 4:** any change to Phase B scripts; after a cluster rebuild.
 
 ---
 
-### Phase D workloads — validated via sibling-app canary, not tpi-bro tests
+### Phase D workloads — ownership boundary
 
-Ollama, Agent A, Agent B, and Agent C workloads running on the cluster
-are not tested here. They are validated by `sibling-app`'s own canary test suite
-(`make canary` and its per-agent variants). Prometheus + Grafana (D-04) is
-validated manually via the Grafana UI on the Tailnet.
-
-No tpi-bro-side tests are planned for Phase D; the sibling-app canary targets are the
-right ownership boundary.
+Agent workloads are deliberately not deployed on this cluster: they belong to
+whatever consumer sits upstream of the job queue (ADR-0028), and their tests
+belong there too. What this repo does own and check: Ollama (deployed via
+`install-ollama.sh`) and Prometheus + Grafana (D-04), currently validated
+manually via the Grafana UI on the Tailnet plus `install-monitoring.sh
+--verify` (a status printer, not an assertion — do not gate on its exit code).
 
 ---
 
 ### RKNN NPU inference — manual validation only
 
-**What was validated:** Whisper medium on node1 (2026-06-16) using
-`tagx/images/whisper-stt:rknn` — encoder 10.4 s, decoder 238 s (no KV-cache),
-greedy transcription of a Swedish audio clip.
+**What was validated:** Whisper medium on node1 — originally 2026-06-16 with
+the naive decoder (`tagx/whisper-stt:rknn` image — encoder 10.4 s, decoder
+238 s, no KV-cache), and re-validated 2026-08-14 end-to-end through
+`charts/whisper/` with the SA-KV decoder (`rknn.decoder: sa-kv`, ~2.0 s/step,
+fingerprint-verified cache delivery, correct real-audio transcript).
 
 **Why not automated:** requires a running RK3588 node with RKNN models at
 `/mnt/ssd/whisper-models/rknn/<model>/` and a `--privileged` container. No CI
@@ -398,27 +403,19 @@ docker run --privileged \
   -v /mnt/ssd/whisper-models/rknn/medium:/models \
   -v /tmp/test.wav:/audio/test.wav \
   rk1-node1:5000/tagx/whisper-stt:rknn \
-  python infer_rknn.py --audio /audio/test.wav --language sv
-# Expect: transcript printed; encoder ~10 s
+  python infer_rknn_sa_kv.py --audio /audio/test.wav --language sv --shim
+# Expect: transcript printed; ~2 s/decode-step
 ```
 
-**Trigger:** `librknnrt.so` version bump (see BACKLOG E-02); kernel or driver
-update; new model size; after `tagx` container image rebuild.
+**Trigger:** `librknnrt.so` version bump (version-coupling row in
+`HARDWARE-FIRMWARE-ISSUES.md`); kernel or driver update; new model size;
+after `tagx` container image rebuild. Judge cache delivery with tagx
+`debug/fingerprint_cache_delivery.py`, never a bare cosine check.
 
 ---
 
-### shellcheck — not in CI
+### shellcheck — in CI since 2026-08-14
 
-Phase A scripts pass shellcheck locally but it is not enforced in CI. Phase B
-scripts have not been shellchecked.
-
-**To add:**
-```yaml
-# In .github/workflows/ci.yml:
-- name: shellcheck
-  uses: ludeeus/action-shellcheck@master
-  with:
-    scandir: './scripts'
-```
-
-**Trigger:** add before the Phase C milestone.
+Enforced in `.github/workflows/ci.yml` (lint job) and locally via the
+pre-commit hook. `scripts/bmc/*` additionally pass `shellcheck -s sh`
+(BusyBox/POSIX target).

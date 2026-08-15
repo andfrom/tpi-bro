@@ -47,7 +47,8 @@ Concretely:
 - The cluster guarantees the execution semantics behind the queue:
   scale-from-zero per job type, capability-based placement
   (`tpi-bro/<capability>` labels, ADR-0022/E-02), model-affinity warm
-  routing (ADR-0027), priority and eviction of interruptible work (E-03),
+  routing (ADR-0027), priority and eviction of interruptible work (native
+  preemption + TERM-trap requeue; ADR-0030),
   containerized workloads only (ADR-0024).
 - **The queue is the system boundary, not a cluster-internal detail.** The
   same queue may be consumed by workers *outside* the cluster — a laptop
@@ -79,21 +80,24 @@ Concretely:
 
 - **Sequencing.** (1) Bring-up orchestrator first — it gates the public
   release regardless of this ADR. (2) E-01 (KEDA + Redis) next — the queue
-  *is* the contract, and E-03/E-04/E-05 all build behind it. (3) A
+  *is* the contract, and the scheduling work builds behind it (E-04;
+  E-03/E-05 were later closed by ADR-0030). (3) A
   demonstration pipeline: chunked audio → Whisper STT job (warm worker via
   model affinity) → trigger-extraction job → event handed off at the
   boundary. Close-to-live with a deliberate delay — an honest non-real-time
   trigger loop, and the flagship example of the contract in use.
-- **E-05's dispatcher-state questions stay cluster-internal.** Whatever the
-  dispatcher needs to know (warm nodes, capacity) it learns from the k8s
-  API on its side of the queue; none of it leaks into the contract.
+- **The dispatcher-state questions (then E-05) stay cluster-internal.**
+  Whatever the scheduler side needs to know (warm nodes, capacity) it
+  learns from the k8s API on its side of the queue; none of it leaks into
+  the contract. (Resolved by ADR-0030: no dispatcher daemon at all.)
 - **E-06 (image labels) becomes the job-type ↔ capability glue**: job types
   reference container images whose labels declare capability needs; the
   dispatcher matches those against node labels. Still gated on the upstream
   image-label implementation.
 - **Job-type schema is deliberately not designed in this ADR.** Queue key
-  naming, payload shape, result convention, and versioning are E-01/E-05
-  work — designing them without a first real consumer would be speculation.
+  naming, payload shape, result convention, and versioning were settled in
+  ADR-0029 — designing them without a first real consumer would have been
+  speculation.
 - **Possible generalization, noted but not pursued:** nothing in the
   contract is TuringPi-specific. With CM4/RPi or Jetson Orin Nano modules
   (DOC-04), the same queue-fronted execution tier generalizes to arbitrary
@@ -106,4 +110,4 @@ Concretely:
   machinery behind the boundary)
 - ADR-0024 — all workloads in containers
 - ADR-0026 / ADR-0027 — parallel dispatch, model-affinity scheduling
-- `backlog/BACKLOG.md` E-01, E-03, E-04, E-05, E-06
+- `backlog/BACKLOG.md` E-04, E-06, E-07 (E-01 delivered — ADR-0029/charts/jobqueue; E-03/E-05 closed by ADR-0030)

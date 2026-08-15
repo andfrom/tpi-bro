@@ -90,8 +90,8 @@ the audio window anyway) simply accept the gap.
 
 A reliable-delivery pattern (`RPOPLPUSH`/`LMOVE` to a per-worker processing
 list with reaper, or Redis Streams with consumer groups) is deliberately
-deferred until a real consumer demonstrates the need — likely alongside
-E-05's dispatcher design.
+deferred until a real consumer demonstrates the need (the dispatcher-state
+questions themselves were settled by ADR-0030).
 
 ### Versioning
 
@@ -114,5 +114,5 @@ producers. Revisit when there are enough real types for this to hurt.
 
 - ADR-0028 — the queue as the sole external boundary
 - ADR-0022 — event-driven scheduling and interruptible workloads
-- `backlog/BACKLOG.md` — E-track preamble (band rotation), E-03/E-04/E-05
+- `backlog/BACKLOG.md` — E-track preamble (band rotation), E-04; ADR-0030 (closed E-03/E-05)
 - `charts/jobqueue/` — reference implementation (`echo`)

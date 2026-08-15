@@ -32,11 +32,11 @@ Two things worth knowing that aren't obvious from official docs:
 length varies between units, and a too-short bushing can bend the PCB if screwed
 all the way in. Return/replace any heatsink with mismatched bushings.
 
-![Bending of PCB due to too short busing](../assets/images/pcb-bending-too-short-busing.png)
-
-**F Panel**: if using the TuringPi ATX case, wire [Power] and [Power LED] like this:
-
-![F Panel pin layout and photo](../assets/images/f-panel-pin-layout.png)
+<!-- TODO: add the PCB-bending and F-panel wiring photos (referenced images
+     were never committed). -->
+**F Panel**: if using the TuringPi ATX case, wire [Power] and [Power LED] per
+the F-panel pin layout printed on the board (see the official TuringPi case
+docs for the diagram).
 
 If you ever need to factory-reset a node (e.g. lost passwords), move the power
 connector to the reset pins and hold for 10s, then move it back.
@@ -130,7 +130,8 @@ curl http://rk1-node1:5000/v2/_catalog   # Phase A registry only — HTTP, ephem
 
 > **One-command alternative:** `./scripts/bootstrap-operational.sh` runs this
 > step AND everything after it (resource policy, capability labels, the full
-> Tailscale mesh, GitOps, Ollama, monitoring), ending with the cluster health
+> Tailscale mesh, GitOps, Ollama, monitoring, the KEDA+Redis job queue, and
+> the self-healing watchdogs), ending with the cluster health
 > check green. It's staged and resumable (`--from`/`--to`/`--dry-run`), does a
 > preflight that lists every missing tool/credential up front, and pauses once
 > for the one manual action (approving Tailscale subnet routes in the admin
@@ -153,7 +154,7 @@ against nodes whose NVMe already has data from a prior run) won't wipe it.
 
 ```bash
 ./scripts/bootstrap-phase-b.sh --from B2_registry   # resume from a specific stage
-./scripts/bootstrap-phase-b.sh --check              # + 10-check cluster health test
+./scripts/bootstrap-phase-b.sh --check              # + runs the 19-check cluster health test
 ```
 
 Credentials land in `~/.turingpi/credentials.kv` (mode 600, gitignored).
@@ -188,12 +189,12 @@ prior setup, generate a fresh one rather than reusing an old `TAILSCALE_AUTH_KEY
 [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md). tpi-bro provides the cluster
 and registry; each application owns its own Dockerfile, build tooling, and
 Kubernetes manifests. If you're bringing up this cluster to run applications
-from sibling repos (e.g. `sibling-app`, `tagx`), you need to separately clone those,
+from other repos (e.g. `tagx`), you need to separately clone those,
 build their images, and push them using whatever build flow that repo defines:
 
 ```bash
 # example — adjust for whatever app repo you're deploying
-cd ../sibling-app
+cd ../tagx
 make build-push   # or whatever that repo's build flow is
 ```
 
@@ -209,7 +210,7 @@ Only after the image exists at `rk1-node1:5000/<your-image>:<tag>` will a
 kubectl get nodes                              # all 4 Ready
 curl -sk https://rk1-node1:5000/v2/_catalog     # registry reachable, TLS
 tailscale status                                # nodes visible on your tailnet
-./tests/check-cluster.sh                        # 10-check health test
+./tests/check-cluster.sh                        # 19-check health test
 ```
 
 ---

@@ -254,7 +254,7 @@ kubectl get svc kube-prometheus-stack-grafana -n monitoring \
 
 Your URL will look like:
 ```
-http://monitoring-kube-prometheus-stack-grafana.tailXXXXX.ts.net
+http://monitoring-kube-prometheus-stack-grafana.<your-tailnet>.ts.net
 ```
 
 ### Step 4 — Open Grafana and log in

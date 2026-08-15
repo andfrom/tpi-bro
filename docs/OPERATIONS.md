@@ -3,7 +3,7 @@
 The single source of truth for current hardware, access methods, and credentials
 format. For phase-by-phase progress and what's next, see [ROADMAP.md](ROADMAP.md).
 
-_Last updated: 2026-08-14 (Phase B + Tailscale mesh rebuilt from scratch after a fresh-run Phase A test reflashed the nodes; B-04 GitOps added; D-01 (Ollama) and D-04 (Prometheus+Grafana) redeployed same day; D-02 (Agent A) intentionally not redeployed — see Software Stack table)_
+_Last updated: 2026-08-16 (job queue + self-healing watchdogs added to the stack table; observability section corrected to Running)_
 
 ## Cluster Hardware
 
@@ -41,11 +41,13 @@ _Last updated: 2026-08-14 (Phase B + Tailscale mesh rebuilt from scratch after a
 | Registry (Phase B) | Helm chart (`charts/registry/`), TLS + basic auth | **Running** on node1 (HostPort 5000, PVC 50Gi local-ssd); rebuilt 2026-08-14 |
 | Storage | `local-ssd` StorageClass (rancher.io/local-path-ssd, WaitForFirstConsumer) | **Running** in kube-system; scoped to nodes 1–3 (NVMe only); rebuilt 2026-08-14 |
 | LLM runtime | Ollama (`charts/ollama/`); one Deployment per NVMe node; 200Gi PVC `local-ssd` | **Running** on nodes 1–3, `llama3.2:1b` loaded on each; redeployed 2026-08-14 after the 2026-08-13 reflash wiped the original 2026-05-11 deployment |
-| Agent | `sibling-app`'s Agent A; FastAPI on port 18090 | **Not deployed** — sibling-app's agents are intentionally kept off this cluster; the 2026-05-11 deployment was wiped by the 2026-08-13 reflash and not redeployed. See [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern if this changes |
+| Agent workloads | (consumer-owned; e.g. an evaluation agent on FastAPI, port 18090) | **Not deployed** — agent workloads are intentionally kept off this cluster and belong to whatever sits upstream of the job queue (ADR-0028). See [DEPLOYING-AN-AGENT.md](DEPLOYING-AN-AGENT.md) for the generic pattern if this changes |
+| Job queue | KEDA + Redis (`charts/jobqueue/`), typed lists, `echo` demo ScaledJob | **Running** since 2026-08-15 — the ADR-0028 boundary; end-to-end roundtrip asserted by check C19 |
+| Self-healing | On-SoC hardware watchdogs (all 4 nodes) + BMC-resident node watchdog (ssh + deep probes) | **Running** since 2026-08-15/16; see [SELF-HEALING.md](SELF-HEALING.md) |
 | Network mesh | Tailscale 1.102.2; all 4 nodes + laptop on Tailnet; subnet routes `10.42.0.0/16` + `10.43.0.0/16` advertised via node1 | **Running** — all 3 layers rebuilt 2026-08-14 after the reflash wiped the previous mesh state |
 | Ingress | Traefik (k3s built-in) | Running (k3s default); superseded by Tailscale operator for service exposure |
 | Observability | kube-prometheus-stack (Prometheus + Grafana + Alertmanager + node-exporter + kube-state-metrics); `charts/monitoring/values.yaml` | **Running** in `monitoring` namespace; Grafana exposed on Tailnet; redeployed 2026-08-14 after the 2026-08-13 reflash wiped the original 2026-05-11 deployment |
-| NPU inference | `rknn-toolkit-lite2` + `librknnrt.so` 2.3.2; Whisper medium encoder+decoder; `tagx/whisper-stt:rknn` image | **Validated** on node1 (2026-06-16); `--privileged`; models at `/mnt/ssd/whisper-models/rknn/`; no KV-cache decoder yet (W-03) |
+| NPU inference | `rknn-toolkit-lite2` + `librknnrt.so` 2.3.2; Whisper medium encoder+decoder; `tagx/whisper-stt:rknn` image | **Validated** on node1 (2026-06-16); `--privileged`; models at `/mnt/ssd/whisper-models/rknn/`; SA-KV KV-cache decoder wired 2026-08-14 (`rknn.decoder: sa-kv`, ~2.5× vs naive; see RKNN-SA-KV-DECODER-BUG.md) |
 
 ## Access Methods
 
@@ -72,11 +74,11 @@ Check live IPs with `tailscale status` or at <https://login.tailscale.com/admin/
 
 Subnet routes `10.42.0.0/16` (pods) and `10.43.0.0/16` (services) advertised by node1 and approved in Tailscale admin. Laptop runs `tailscale up --accept-routes`. All ClusterIP services are directly routable from the laptop — no port-forwarding required.
 
-Layer 3 (Tailscale Kubernetes operator) deployed in namespace `tailscale` (rebuilt 2026-08-14). No services are currently exposed through it — Agent A and monitoring, the two previous consumers, aren't deployed right now (see Software Stack table). Add a service with `./scripts/setup-tailscale-operator.sh --expose svc/NAME -n NAMESPACE`; the operator names devices as `<namespace>-<service>`.
+Layer 3 (Tailscale Kubernetes operator) deployed in namespace `tailscale` (rebuilt 2026-08-14). Grafana is exposed through it (see Observability below). Add a service with `./scripts/setup-tailscale-operator.sh --expose svc/NAME -n NAMESPACE`; the operator names devices as `<namespace>-<service>`.
 
 ## Observability (D-04)
 
-**Not currently deployed.** Built 2026-05-11, wiped by the 2026-08-13 reflash, not redeployed as of 2026-08-14 — kept out of scope for the same reason as D-01/D-02 (rebuild focused on B0–B4-gitops + Tailscale only). The table below describes how it worked when it was last deployed, as a reference for redeploying it.
+**Running** (redeployed 2026-08-14 after the reflash; see the Software Stack table).
 
 | Component | URL | Notes |
 |-----------|-----|-------|
@@ -109,15 +111,14 @@ Run once on each laptop that needs to push images or run `kubectl` off-LAN:
 # 1. Trust the registry CA cert in Docker for the Tailscale registry address
 ./scripts/setup-offnet-access.sh
 
-# 2. Add to sibling-app/.env:
-#    TAILSCALE_REGISTRY_IP=<node1-tailscale-ip>
-# Then export it and build:
+# 2. In the repo that builds your images, export the registry address
+#    and build/push:
 export TAILSCALE_REGISTRY_IP=<node1-tailscale-ip>
-cd ../sibling-app && make build-push
+make build-push   # or your image repo's equivalent
 ```
 
 If the Tailscale IP changes (re-provisioning): update `NODE1_TAILSCALE_IP` in `bootstrap-config.kv`,
-regenerate certs with `gen-registry-certs.sh`, re-run `setup-offnet-access.sh`, and update `sibling-app/.env`.
+regenerate certs with `gen-registry-certs.sh`, re-run `setup-offnet-access.sh`, and update the exported registry address wherever your image builds read it.
 
 ## Laptop Requirements
 
@@ -172,7 +173,7 @@ All three NVMe nodes are labeled `storage.tpi-bro/nvme=true`. Workloads express 
 
 Registry PVC `registry-data` is on `local-ssd` (node1, co-located with HostPort 5000). The HostPort node1 pin is permanent in practice: the registry's local-SSD PVC ties it to node1 regardless of what IP fronts it (MetalLB was evaluated and dropped 2026-08-15 — see ROADMAP/backlog C-01).
 
-## Finding and reconnecting to the BMC (DOC-01)
+## Finding and reconnecting to the BMC
 
 The BMC is the cluster's always-on anchor — power control, serial consoles,
 flashing, and the self-healing outer loop all go through it. When

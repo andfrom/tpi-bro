@@ -5,7 +5,7 @@
 
 ## Context
 
-The cluster has 4× RK1 modules with 32 GB RAM each. A realistic application (e.g., the `sibling-app` agent framework) may have 7 or more agents. Naively requiring one agent per node would cap the system at 4 simultaneously-running agents — unnecessarily restrictive.
+The cluster has 4× RK1 modules with 32 GB RAM each. A realistic multi-agent application may have 7 or more agents. Naively requiring one agent per node would cap the system at 4 simultaneously-running agents — unnecessarily restrictive.
 
 The actual constraint is at the model level, not the agent level: **a single LLM's weight tensor must reside in contiguous address space on one physical machine**. It cannot be split across nodes. But multiple agent processes can share a node as long as their combined memory demand fits.
 
@@ -18,7 +18,7 @@ The actual constraint is at the model level, not the agent level: **a single LLM
 - Agent services that are lightweight wrappers (FastAPI + HTTP calls to a local Ollama) have a small memory footprint and can be co-located freely.
 - Services with no LLM dependency (API gateway, vector DB, queues, observability) are scheduled normally by the K8s scheduler.
 
-For `sibling-app` specifically: if 7 agents all call one Ollama server running a single model, all 7 can target the same node. If they use distinct models, each model is pinned to its own node and the agents follow their respective model.
+Concretely: if 7 agents all call one Ollama server running a single model, all 7 can target the same node. If they use distinct models, each model is pinned to its own node and the agents follow their respective model.
 
 ## Consequences
 

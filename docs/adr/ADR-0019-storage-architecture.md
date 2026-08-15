@@ -43,7 +43,7 @@ changing application manifests.
 **Hardcoded hostname pins are only justified by hardware constraints**, not by
 storage policy. Current exceptions:
 - Registry: pinned to `rk1-node1` because of HostPort 5000 (a networking
-  constraint, not a storage one). Will be removed when MetalLB is in place (C-01).
+  constraint, not a storage one). Permanent in practice: MetalLB was evaluated and dropped 2026-08-15 (see backlog C-01 note).
 - Ollama: pinned to the node where model weights are downloaded (avoids
   re-downloading 10–30 GB on reschedule). This is an Ollama concern, not a
   platform policy.
@@ -62,8 +62,9 @@ is available for workloads that need no persistent storage or that use eMMC
 ### Registry storage
 
 The registry PVC uses `local-ssd` on node1. It is the one legitimate hostname-
-pinned case because the HostPort is also on node1. Both the pin and the HostPort
-dependency will be removed together when MetalLB is deployed.
+pinned case because the HostPort is also on node1 — and since the PVC's data
+lives on node1's NVMe regardless, a LoadBalancer VIP wouldn't unpin it;
+MetalLB was evaluated and dropped 2026-08-15.
 
 ### Model weights (Ollama)
 

@@ -14,7 +14,7 @@ TODO list.
 **Status:** TODO  
 Handle the case where `rk1-node1`'s DHCP lease changes. Options: static IP reservation on router, or CoreDNS custom entry in k3s. Largely mitigated already: the bootstrap configures static node IPs and everything laptop-side resolves by hostname.
 
-Note (2026-08-15): **B-05/MetalLB was dropped** rather than being the answer here. Every job it would do is covered or moot on this cluster — service exposure belongs to the Tailscale operator, the registry is pinned to node1 by its local-SSD *storage* regardless of any VIP, node IPs are static, and the ADR-0028 queue boundary rides the Tailscale-routed ClusterIP. Revisit a LoadBalancer only if the registry ever gets node-independent storage or a non-Tailnet consumer appears.
+Note: MetalLB was evaluated and dropped (2026-08-15; rationale in `ROADMAP.md`). Revisit a LoadBalancer only if the registry ever gets node-independent storage or a non-Tailnet consumer appears.
 
 ### C-02: Laptop-to-cluster image sync
 **Status:** TODO  
@@ -85,10 +85,6 @@ Currently untested. Document gaps once hardware is available.
 
 ---
 
-## Platform Hygiene
-
----
-
 ## Event-Driven Scheduling (ADR-0022)
 
 Per ADR-0028, this track is more than internal plumbing: the typed job
@@ -113,26 +109,12 @@ be expressed as a band *difference* — a dispatcher that enqueues "focused"
 work at the running work's own band has silently broken switching (pinned
 by an E-04 test scenario below).
 
-### E-01: Deploy KEDA + Redis job queue
-
-**Status:** DONE 2026-08-15 — kept briefly (contra the finished-items
-convention) while E-04 still references it; remove when E-04 lands. Delivered: KEDA in
-`keda`, Redis (`redis:7-alpine`, `requirepass`, appendonly, PVC on
-`local-ssd`, `interactive` priority band) in `jobqueue` via
-`charts/jobqueue`, one list key per job type + one `ScaledJob` per type,
-demo `echo` type as the contract's reference implementation, and
-`tests/check-cluster.sh` C19 asserting the full enqueue → scale-from-zero →
-result roundtrip. Contract (envelope, results, at-most-once semantics, and
-the producer obligation that all work be chunked/interruptible):
-**ADR-0029**. Install/verify: `scripts/install-jobqueue.sh` (also a
-`bootstrap-operational.sh` stage).
-
 ### E-04: Affinity scheduling validation
 
 **Status:** IN PROGRESS (runnable subset) / partially blocked on E-07.
 The band/priority scenarios (focus ping-pong without escalation, equal-band
-inertness, background progress on slack) are runnable now against the E-01
-queue + focus-demo machinery. The warm/cold affinity scenarios below require
+inertness, background progress on slack) are runnable now against the
+job queue (ADR-0029, `charts/jobqueue`) + focus-demo machinery. The warm/cold affinity scenarios below require
 warm-model routing to exist first — see E-07. E-03 and E-05 were closed by
 **ADR-0030** (no dispatcher daemon; native preemption + TERM-trap requeue
 supersede the eviction init container; `tpi-bro/interruptible` survives as
@@ -173,16 +155,6 @@ At minimum the validation should cover:
 Results should be recorded in a dedicated benchmark document with wall-clock
 times for warm vs. cold placement.
 
-### E-07: Warm-model affinity implementation
-
-**Status:** TODO — created by ADR-0030 as the implementation half of
-ADR-0027's design. Worker-written `tpi-bro/model-loaded=<model>` node labels
-(set only AFTER the model is actually in memory — never inferred from pod
-phase; advisory on crash-staleness), plus `preferredDuringScheduling` node
-affinity in model-bearing job templates, plus the E-04 warm/cold validation
-scenarios that unblock once this exists. Relates to E-06 (tagx image labels
-could eventually feed the model identity automatically).
-
 ### E-06: Consume tagx's deployment-manifest image labels
 
 **Status:** Future dev — not started, no urgency yet (single schema version,
@@ -221,40 +193,19 @@ images now exist in tagx's registry (`tagx/whisper-stt:latest`,
 `tagx/whisper-stt:rknn`), so labels have real tags to attach to whenever
 tagx's ADR-0008 lands.
 
+### E-07: Warm-model affinity implementation
+
+**Status:** TODO — created by ADR-0030 as the implementation half of
+ADR-0027's design. Worker-written `tpi-bro/model-loaded=<model>` node labels
+(set only AFTER the model is actually in memory — never inferred from pod
+phase; advisory on crash-staleness), plus `preferredDuringScheduling` node
+affinity in model-bearing job templates, plus the E-04 warm/cold validation
+scenarios that unblock once this exists. Relates to E-06 (tagx image labels
+could eventually feed the model identity automatically).
+
 ---
 
 ## Whisper STT
-
-### W-03: Self-attention KV cache for RKNN Whisper decoder
-
-**Status:** DONE except final measurement polish — root-caused, fixed, and
-productionized 2026-08-14. The failure was never a silicon/scale limit:
-librknnrt 2.3.2 silently never delivers NC1HWC2-native-layout graph inputs
-on real RK3588, at any model size. The "input shim" (3D cache inputs,
-unsqueezed in-model so they enter in linear layout) routes around it — full
-story in `docs/RKNN-SA-KV-DECODER-BUG.md`.
-
-Productionized same day:
-- Shim is the canonical export (`_DecoderSAKVStepShim` in tagx
-  `export_onnx.py`; `convert_rknn.py` shapes updated); canonical
-  re-export/convert deployed to node1
-  (`whisper_decoder_sa_kv_step_medium.rknn`, replacing the broken 4D
-  artifact) and validated on hardware (cosine 0.999951 + fingerprint
-  "caches DELIVERED" + correct real-audio transcript).
-- `charts/whisper/` gained `rknn.decoder: sa-kv` (command override to
-  `infer_rknn_sa_kv.py`, XA-KV/SA-KV env wiring, `WHISPER_SA_KV_SHIM=1`);
-  the `tagx/whisper-stt:rknn` image now ships the SA-KV driver.
-- FP16 input feeds implemented (`--fp16-feeds`) and fingerprint-verified:
-  measured **~1.10×** (2,027 → 1,834 ms/step) — NOT the ~1.5× projected by
-  tagx's live-transcription notes (that number came from a deleted script
-  and doesn't reproduce through `rknnlite.inference()`; a genuine 1.5×
-  likely needs the zero-copy/pass-through C-API path). Default off; enable
-  per-run with the flag or `WHISPER_SA_KV_FP16_FEEDS=1`.
-
-Bottom line: SA-KV decode is ~2.5× the naive decoder (2.0 s/step vs
-5.0 s/step, medium; ~1.8 s/step with fp16 feeds). Remaining ideas beyond
-this (zero-copy I/O, smaller live-tier models) belong to tagx's
-live-transcription program, not this repo.
 
 ### W-04: Publish prebuilt RKNN model artifacts (verified distribution)
 
@@ -312,7 +263,7 @@ watchdog, per the hard-won operational rule:
 Workaround candidates, in order of promise: (a) split decoder (2×16 —
 if growth is superlinear in depth, halving layers may bring init into
 the ~2× regime; the split mechanics were already proven during the W-03
-false-trail phase); (b) reduced n_ctx export; (c) **large-v3-turbo** —
+false-trail phase (see `RKNN-SA-KV-DECODER-BUG.md`)); (b) reduced n_ctx export; (c) **large-v3-turbo** —
 its 4-layer distilled decoder is likely the pragmatic destination for
 large-v3-quality STT on this hardware regardless (encoder already
 proven: the 1.36 GB large-v3 encoder inits fine).
@@ -352,7 +303,7 @@ measured **CPU side** and the Whisper capability summary:
   **Optimised CPU faster-whisper (INT8) does medium at ~2× real-time — beats the
   NPU SA-KV decoder.** NPU's real Whisper value = the encoder (~2× CPU) or
   smaller models; `small` is the realtime tier (~1× realtime, first usable
-  Swedish quality). See `tagx/mem/backlog/live-transcription-optimization.md`.
+  Swedish quality). See tagx `docs/backlog/live-transcription-optimization.md`.
 
 ### NC-03: Remaining characterization gaps
 
@@ -418,8 +369,9 @@ an image layer).
 
 **Key finding:** Rockchip's official `airockchip/rknn-llm` toolkit supports
 LLM inference on the NPU. Community projects (e.g. `rkllm-server`) wrap it
-with an Ollama-compatible HTTP API, meaning the sibling-app stack (Agent A,
-`OLLAMA_URL`) would not need changes — just swap the inference endpoint.
+with an Ollama-compatible HTTP API, meaning any consumer that already
+speaks to Ollama (`OLLAMA_URL`) would not need changes — just swap the
+inference endpoint.
 
 **Suggested first step (self-contained experiment)**  
 Clone `rknn-llm`, convert `llama3.2:1b` on the laptop, run `rkllm-server` on

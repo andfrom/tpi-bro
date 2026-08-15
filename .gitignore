@@ -36,3 +36,15 @@ scratch/
 .DS_Store
 *.swp
 *~
+
+# Credential-shaped files — never commit these even if created in-tree
+# (docs instruct creating ~/.turingpi/credentials.kv, but belt-and-braces
+# in case one lands here)
+credentials.kv
+*.pem
+*.key.pub
+id_rsa*
+id_ed25519*
+.netrc
+*.p12
+*.pfx

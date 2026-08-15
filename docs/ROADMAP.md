@@ -1,6 +1,6 @@
 # tpi-bro — Roadmap
 
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-16_
 
 ## Summary
 
@@ -33,7 +33,7 @@ order with `--from`/`--to` resume support and `--dry-run`:
 # Resume after a failure
 ./scripts/bootstrap-phase-b.sh --from B2_registry
 
-# Run full suite and finish with the 10-check health test
+# Run full suite and finish with the 19-check health test
 ./scripts/bootstrap-phase-b.sh --check
 ```
 
@@ -68,7 +68,7 @@ Prerequisite: `helm` must be installed on the laptop (see `docs/PREREQUISITES.md
 ### Cluster health check (Suite 4)
 
 ```bash
-./tests/check-cluster.sh          # 14 checks: nodes Ready, registry, TLS, auth, push, per-node pull, storage
+./tests/check-cluster.sh          # 19 checks: nodes, registry+TLS+auth+pull, storage, labels, priorities, Tailscale, job queue
 ./tests/check-cluster.sh --quick  # skip pod-pull checks (C07–C10); still runs storage checks C11–C14
 ```
 
@@ -82,19 +82,30 @@ Not started (blocked on Phase B). See `backlog/BACKLOG.md` (C-01 through C-03).
 
 Ollama (D-01) and monitoring (D-04) are running, redeployed 2026-08-14 after
 the Phase A reflash wiped the original 2026-05-11 deployment. Agent
-workloads (D-02) are intentionally not deployed — sibling-app's agents are kept
-off this cluster; see `docs/OPERATIONS.md` for the reasoning and current
-state.
+workloads (D-02) are intentionally not deployed — agent workloads belong to
+whatever consumer sits upstream of the job queue (ADR-0028) and are kept off
+this cluster; see `docs/OPERATIONS.md` for the reasoning and current state.
 
 ## NPU / Whisper
 
-Whisper `medium` inference on the RK3588 NPU already works (see `docs/NPU-MODELS.md`, `adr/ADR-0023-rknn-npu-device-access-pattern.md`). Open work is tracked in `backlog/BACKLOG.md` under **Whisper STT** (W-03) and **NPU Characterization** (NC-01–NC-03) — not duplicated here.
+Whisper `medium` inference on the RK3588 NPU already works (see `docs/NPU-MODELS.md`, `adr/ADR-0023-rknn-npu-device-access-pattern.md`). Open work is tracked in `backlog/BACKLOG.md` under **Whisper STT** (W-04/W-05) and **NPU Characterization** (NC-01–NC-03) — not duplicated here.
 
 ---
 
 ## Immediate Next Steps
 
-1. **large-v3 RKNN conversion** — next model in priority table after medium validated (now including its SA-KV shim decoder; see `docs/RKNN-SA-KV-DECODER-BUG.md`).
+1. **W-05: localize the `rknn_init` runaway** — large-v3's SA-KV decoder
+   *converts* fine (done 2026-08-15, incl. driver support) but on-device
+   init allocates >11× model size and cannot complete on a 32 GB node,
+   while a same-size non-SA-KV decoder inits normally — a
+   structure-sensitive defect, not a size wall. Layer/context/shim sweeps
+   underway; see `docs/RKNN-SA-KV-DECODER-BUG.md` §Postscript and W-05.
+2. **Open-source release** — audit done (leak sweep, docs, testing gaps);
+   remaining: docs sweep, CHANGELOG, history rewrite, tag.
+
+(Self-healing shipped 2026-08-15/16: on-SoC hardware watchdogs + a
+BMC-resident node watchdog with ssh + deep probes, validated by
+deliberately crashing/hanging live nodes; see `docs/SELF-HEALING.md`.)
 
 (W-03 KV-cache decoder: done 2026-08-14 — root-caused, fixed via the input
 shim, productionized into `charts/whisper/` at ~2.5× the naive decoder.

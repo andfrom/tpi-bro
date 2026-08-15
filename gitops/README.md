@@ -7,6 +7,11 @@ This directory is the platform repo Flux reconciles against, per [ADR-0005](../d
 - `flux-system/` — the bootstrap `GitRepository` + `Kustomization` that point Flux at this repo and at `apps/`. Applied once via `scripts/install-gitops.sh` (which wraps `flux install`, the deploy-key secret, and `kubectl apply -f gitops/flux-system/gotk-sync.yaml`); Flux reconciles it continuously from here on.
 - `apps/` — where workload manifests (Kustomize overlays, `HelmRelease` CRs) go. Flux prunes anything removed from here, so nothing should be added that isn't meant to be cluster-managed.
 
+**Running from a fork?** `flux-system/gotk-sync.yaml` hardcodes this repo's
+upstream URL (it documents the reference deployment). Point the
+`GitRepository`'s `url:` at your fork before running `install-gitops.sh` —
+the script reads the URL from that file, so it's the single place to edit.
+
 ## Adding a workload
 
 Add a `HelmRelease` + `HelmRepository` (or plain Kustomize manifests) under `apps/`, reference it from `apps/kustomization.yaml`, commit, push. Flux picks it up on the next reconcile (default interval: 5m, or force with `flux reconcile kustomization flux-system`).

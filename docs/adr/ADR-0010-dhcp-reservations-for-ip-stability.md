@@ -62,4 +62,4 @@ After any re-flash cycle, the sequence is:
 2. Run `setup-static-ips.sh` — configures static IPs and updates state file
 3. Continue with Phase B
 
-`setup-static-ips.sh` and the BMC web UI step are documented in the Phase B0 section of `TODO.md`.
+`setup-static-ips.sh` is documented in `docs/GETTING-STARTED.md` (Phase B0 step) and in the script's own header.

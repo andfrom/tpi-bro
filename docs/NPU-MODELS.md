@@ -368,11 +368,12 @@ laptop (see tagx repo for conversion scripts). Validated on node1 using the
 | Encoder   | ~20s (est) | **10.4s**  | Single forward pass on NPU |
 | Decoder   | —          | ~240s      | 47 steps, **no KV-cache** — not a valid benchmark |
 
-The decoder time is not meaningful. The current RKNN decoder re-runs the full
-448-token sequence on every decode step (no KV-cache). Each step takes ~5s —
-47 steps = 240s. With a KV-cache decoder (cross-attention cached after step 1,
-self-attention growing by 1 token/step), this should drop to ~1s total.
-See W-03 in backlog.
+The naive decoder time is not meaningful: it re-runs the full 448-token
+sequence every step (~5 s/step). The SA-KV decoder (W-03, done 2026-08-14)
+fixes this — **measured 2.0 s/step, ~2.5× over naive** (a 2026-06 note here
+once projected "~1 s total"; that projection did not survive measurement).
+It's wired into `charts/whisper/` as `rknn.decoder: sa-kv`; full story in
+`RKNN-SA-KV-DECODER-BUG.md`.
 
 **RKNN model sizes (FP32, medium):**
 

@@ -192,7 +192,7 @@ measured cells (medium, FP16, single core, librknnrt 2.3.2):
 | Stage | Phase | Measured | Layer it exercises |
 |---|---|---|---|
 | Decoder step | `set_inputs` (FP32 in) | 1001 ms | L2 host-path conversion |
-| Decoder step | `set_inputs` (FP16 in) | **344 ms** | L2 — conversion removed, 1.5× total win |
+| Decoder step | `set_inputs` (FP16 in) | **344 ms** | L2 — conversion removed; end-to-end re-measured at **1.10×** on 2026-08-14, not the 1.5× this stage-delta once projected (see `RKNN-SA-KV-DECODER-BUG.md`) |
 | Decoder step | `run` | **897 ms** | **L1 FP16 compute floor** |
 | Decoder step | `get_outputs` | ~25 ms | L2 retrieval |
 | Decoder step | 3-core `run` | 836 ms (1.07×) | L6 intra-op scaling (poor for 1-token) |
@@ -208,7 +208,7 @@ measured cells (medium, FP16, single core, librknnrt 2.3.2):
 - 3-core helps big ops, not tiny ones — confirm per stage, never assume.
 
 Open Whisper-specific cells (cost-table to fill) live in tagx
-`mem/backlog/live-transcription-optimization.md`.
+`docs/backlog/live-transcription-optimization.md`.
 
 ---
 
@@ -234,7 +234,7 @@ Open Whisper-specific cells (cost-table to fill) live in tagx
 
 ---
 
-## Reusable harness (planned)
+## Reusable harness (built — see `tools/npu-bench/`)
 
 A parametrized microbenchmark tool that emits structured rows (JSON/CSV) into a
 living datasheet:
@@ -247,5 +247,5 @@ npu-bench --bandwidth --buffer-mb 256
 
 Each cell is one command, re-runnable when silicon/driver/runtime/toolchain
 versions change. Output accumulates into `docs/NPU-DATASHEET.md` (the lookup
-table architecture decisions cite). Harness does not exist yet — this doc is the
-spec for it.
+table architecture decisions cite). Built 2026-06-18 (`tools/npu-bench/`,
+incl. `calculator.py`); this section was its original spec.
