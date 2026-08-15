@@ -189,8 +189,30 @@ document's bug: **`rknn_init` itself is pathological at this model size.**
   pipeline).
 
 Verdict: **medium is the practical SA-KV model-size ceiling on
-librknnrt 2.3.2 / 32 GB RK1s.** The 764 MB medium decoder initializes and
-runs in production; the 1.77 GB large-v3 decoder cannot be initialized at
+librknnrt 2.3.2 / 32 GB RK1s.** The medium decoder initializes and runs
+in production; the 1.77 GB large-v3 decoder cannot be initialized at
 all. Operational lesson folded into `HARDWARE-FIRMWARE-ISSUES.md`: never
 run RKNN workloads without a memory cap — a runaway init inside a capped
 container costs you the container; uncapped, it costs you the node.
+
+**Refinement (same day): it is not model size.** Two capped init-only
+probes (peak RSS via `ru_maxrss`, same runtime/driver, same node):
+
+| Model | Size | Init result | Peak RSS | Overhead |
+|---|---|---|---|---|
+| medium SA-KV step | 0.94 GB | OK, 1.2 s | 2.10 GB | ~2.2× |
+| June large-v3 cached-xa decoder | **1.80 GB** | OK, 2.0 s | 3.83 GB | ~2.1× |
+| large-v3 SA-KV step | 1.77 GB | killed at 20 GB cap, ~30 s, not done | >20.9 GB | **>11×, unbounded?** |
+
+Normal `rknn_init` overhead is ~2× at every size tested, including a
+model *larger* than the failing one. The runaway is specific to the
+**SA-KV step graph at large-v3 dimensions** — candidate drivers: ~130
+graph I/O tensors, 64 in-model `Unsqueeze` ops (the input shim), the
+concat-at-449 static shapes, or an interaction between them and the
+larger head count/width. This mirrors the main bug's lesson: it looked
+like a scale wall and is actually a structure-sensitive defect — which is
+good news, because structure-sensitive defects have workarounds. The
+experiment ladder to localize it (layer-count sweep via
+`minimal_repro_nlayer.py --export-rknn`, shim-on/off control, n_ctx
+sweep, C-API memory instrumentation) is tracked as **W-05** in the
+backlog.

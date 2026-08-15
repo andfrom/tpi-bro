@@ -24,6 +24,42 @@ Script to sync images from laptop's local Docker daemon to the cluster registry 
 **Status:** TODO  
 Document how to federate the local cluster with a cloud K8s cluster (e.g., for GPU inference overflow).
 
+### C-04: Self-healing node recovery (watchdog layers)
+
+Motivated by the 2026-08-15 incident: a runaway `rknn_init` kernel-wedged
+node1 (ping alive, sshd/API dead, OOM killer stuck) and only a manual BMC
+power-cycle recovered it. Design as independent layers:
+
+1. **On-SoC hardware watchdog (first line, cheapest).** The RK1 has the
+   Synopsys watchdog (`watchdog@feaf0000`, `CONFIG_DW_WATCHDOG=y`) but the
+   device-tree node is `status = "disabled"` — enable via DT overlay, then
+   set `RuntimeWatchdogSec=60` in systemd so PID1 pets it. A starved PID1
+   (exactly the observed wedge) then hard-resets the SoC with no external
+   help. Add `kernel.panic=10` + `kernel.panic_on_oops=1` sysctls.
+   Acceptance test: deliberate hang via `echo c > /proc/sysrq-trigger`,
+   node must self-reset. Verify the overlay survives kernel updates.
+2. **BMC-resident watchdog daemon (outer loop).** The BMC is the only
+   always-on vantage that survives all four nodes hanging. Small script:
+   probe each node (ICMP + TCP/22 banner — the measured wedge signature is
+   "ping OK, banner timeout"), and after M consecutive failures over ≥5
+   min, `tpi power off/on -n X`, with cooldown + max-cycles-per-hour guard
+   against boot loops, logging every action. BMC storage may not survive
+   firmware updates → the daemon must be (re)provisioned by a repo script
+   (bootstrap stage alongside the DOC-01 BMC docs).
+3. **Workload layer — already built, one honest gap.** k3s + queue
+   contract (ADR-0029) make workloads reboot-tolerant: today's real
+   power-cycle came back 15/0 on the quick suite with zero manual repair.
+   Gap: SIGTERM-trap requeue only covers *graceful* eviction — a hard
+   power-cycle loses the in-flight chunk. At-most-once is by choice, but
+   producers needing at-least-once must treat `result:<id>` TTL expiry as
+   "re-enqueue" (already their obligation under ADR-0029; document the
+   hard-kill case explicitly).
+4. **Post-recovery verification.** After any automated power-cycle, run
+   `tests/check-cluster.sh --quick` (from the BMC daemon via a node, or a
+   k8s CronJob on boot) and surface the result (Grafana annotation /
+   notification) — self-healing without self-verification is just hiding
+   failures.
+
 ---
 
 ## Phase D — Multi-Agent Workloads
@@ -285,11 +321,43 @@ Work: create the HF model repo, upload encoder/decoder + manifest per
 model, pin hashes in the tagx/tpi-bro manifests, add hash verification to
 the model-fetch path, document in the whisper chart README.
 
-Scope note (2026-08-15): **medium only.** large-v3 converts but cannot be
-initialized on the hardware — `rknn_init` allocates >12× the model size
-(20.9 GB measured for the 1.77 GB decoder) and, uncapped, wedges the node
-(see `HARDWARE-FIRMWARE-ISSUES.md`). Don't publish artifacts users can't
-run.
+Scope note (2026-08-15): **medium only.** large-v3's SA-KV decoder
+converts but cannot be initialized on the hardware — `rknn_init` runs
+away (>20.9 GB measured for the 1.77 GB decoder; a same-size non-SA-KV
+decoder inits at 3.8 GB) and, uncapped, wedges the node (see
+`HARDWARE-FIRMWARE-ISSUES.md`, W-05). Don't publish artifacts users
+can't run.
+
+### W-05: Localize the rknn_init runaway (discovery ladder + workaround)
+
+The large-v3 SA-KV init runaway is structure-sensitive, not
+size-sensitive (measured: normal init is ~2.1–2.2× model size, including
+a 1.80 GB control; the failing graph exceeds 11× without completing —
+`RKNN-SA-KV-DECODER-BUG.md` §Postscript). Structure-sensitive means a
+workaround likely exists, and every probe doubles as evidence for the
+upstream report (`scratch/upstream-drafts/rknn-init-memory-blowup.md`).
+Ladder, cheapest first — every run memory-capped (20 GB) + MemAvailable
+watchdog, per the hard-won operational rule:
+
+1. **Layer sweep**: `minimal_repro_nlayer.py --export-rknn` at large-v3
+   dims for 1/2/4/8/16 layers → init-peak-RSS curve. Superlinear growth
+   or a step localizes the driver (I/O count scales with layers).
+2. **Shim on/off control** at the same depth: is the in-model `Unsqueeze`
+   implicated (bug-interaction with the NC1HWC2 workaround), or does the
+   4D variant blow up too?
+3. **n_ctx sweep** (449 → 225 → 113): if the concat shapes drive it,
+   shrinking context bounds init — and doubles as workaround (b).
+4. **C-API instrumentation**: `rknn_query(RKNN_QUERY_MEM_SIZE)` +
+   `RKNN_FLAG_MEM_ALLOC_OUTSIDE` to see *what* it allocates; shares a
+   harness with the zero-copy FP16-feeds exploration (same C-API work).
+
+Workaround candidates, in order of promise: (a) split decoder (2×16 —
+if growth is superlinear in depth, halving layers may bring init into
+the ~2× regime; the split mechanics were already proven during the W-03
+false-trail phase); (b) reduced n_ctx export; (c) **large-v3-turbo** —
+its 4-layer distilled decoder is likely the pragmatic destination for
+large-v3-quality STT on this hardware regardless (encoder already
+proven: the 1.36 GB large-v3 encoder inits fine).
 
 ---
 
