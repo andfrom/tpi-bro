@@ -1,0 +1,42 @@
+#!/bin/sh
+# Init script for the C-04 layer-2 BMC node watchdog (tpi-bro).
+# Installed to /etc/init.d/ on the BMC by scripts/install-bmc-watchdog.sh.
+
+DAEMON=/etc/bmc-watchdog.sh
+PIDFILE=/var/run/bmc-watchdog.pid
+
+case "$1" in
+  start)
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+      echo "bmc-watchdog already running"
+      exit 0
+    fi
+    echo "Starting bmc-watchdog"
+    nohup "$DAEMON" >/dev/null 2>&1 &
+    echo $! > "$PIDFILE"
+    ;;
+  stop)
+    if [ -f "$PIDFILE" ]; then
+      kill "$(cat "$PIDFILE")" 2>/dev/null
+      rm -f "$PIDFILE"
+      echo "Stopped bmc-watchdog"
+    fi
+    ;;
+  restart)
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+  status)
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+      echo "bmc-watchdog running (pid $(cat "$PIDFILE"))"
+    else
+      echo "bmc-watchdog not running"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|status}"
+    exit 1
+    ;;
+esac

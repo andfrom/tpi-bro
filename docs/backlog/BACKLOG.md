@@ -44,21 +44,26 @@ power-cycle recovered it. Design as independent layers:
    class, which previously needed a manual power-cycle, now self-heals.
    systemd log line to look for: `Using hardware watchdog 'Synopsys
    DesignWare Watchdog', device /dev/watchdog0`.
-2. **BMC-resident watchdog daemon (outer loop).** Live datapoint for why
-   this layer is not optional (2026-08-15): during the layer-1 rollout,
-   node2's warm reboot hit flaky PCIe link training — NVMe absent, network
-   never came up, but the system booted "healthy" to a login prompt. The
-   on-SoC watchdog is useless there (PID1 pets it happily); only an
-   external prober sees "alive but unreachable." Recovery was a BMC cold
-   cycle, diagnosed via `tpi uart -n 2 get` (see
-   `HARDWARE-FIRMWARE-ISSUES.md`). The BMC is the only
-   always-on vantage that survives all four nodes hanging. Small script:
-   probe each node (ICMP + TCP/22 banner — the measured wedge signature is
-   "ping OK, banner timeout"), and after M consecutive failures over ≥5
-   min, `tpi power off/on -n X`, with cooldown + max-cycles-per-hour guard
-   against boot loops, logging every action. BMC storage may not survive
-   firmware updates → the daemon must be (re)provisioned by a repo script
-   (bootstrap stage alongside the DOC-01 BMC docs).
+2. **BMC-resident watchdog daemon (outer loop).** ✅ **DONE (2026-08-15)**
+   — `scripts/bmc/bmc-watchdog.sh` (runs on the BMC, BusyBox sh) +
+   `scripts/install-bmc-watchdog.sh` (provisions to the BMC's persistent
+   `/etc` overlay via sshpass, same pattern as `setStaticNet.sh`;
+   `--verify`, `--test-mode`, `--uninstall`). One probe covers both
+   measured failure signatures (kernel-starved wedge: ping OK/banner dead;
+   PCIe-flake boot: never reachable): `curl telnet://<node>:22` must
+   return an `SSH-2.0` banner. Cycle guards: BMC power state must be On
+   (deliberately-off nodes never touched), 10 consecutive failures over
+   5 min, 300 s boot grace, 30 min per-node cooldown, max 3 cycles per
+   24 h then GIVE-UP (a persistently failing node stays down for a
+   human). Persistent log at `/mnt/sdcard/bmc-watchdog.log`.
+   **Acceptance test passed live**: sshd stopped on node4 → daemon logged
+   `WEDGED node4: 6 consecutive probe failures, power reported On` →
+   autonomous power-cycle → node4 back and cluster 15/0 — no human in the
+   loop. Live datapoint that motivated this layer: node2's warm-reboot
+   PCIe flake booted "healthy" but unreachable — invisible to the on-SoC
+   watchdog by construction (see `HARDWARE-FIRMWARE-ISSUES.md`).
+   Caveat encoded in the installer: the BMC overlay may be reset by
+   firmware updates — re-run the installer after any BMC update.
 3. **Workload layer — already built, one honest gap.** k3s + queue
    contract (ADR-0029) make workloads reboot-tolerant: today's real
    power-cycle came back 15/0 on the quick suite with zero manual repair.
