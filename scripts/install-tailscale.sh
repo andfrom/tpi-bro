@@ -107,13 +107,21 @@ for name in "${NODE_NAMES[@]}"; do
   # Ensure daemon is running
   node_ssh "$name" "sudo systemctl enable --now tailscaled 2>/dev/null || true"
 
-  # Bring up — idempotent; re-running with a key re-authenticates cleanly
-  info "Running tailscale up…"
-  node_ssh "$name" "sudo tailscale up \
-    --auth-key=${AUTH_KEY} \
-    --hostname=${name} \
-    --accept-dns=false \
-    --accept-routes=false"
+  # Bring up — but only if the node isn't already joined and running.
+  # Re-running `tailscale up` on an already-up node is NOT safe here: it
+  # errors out unless every non-default flag is restated, and the server
+  # node legitimately carries extra flags (--advertise-routes from
+  # setup-subnet-router.sh) that this script must not restate or reset.
+  if node_ssh "$name" "tailscale status > /dev/null 2>&1"; then
+    info "Already joined and running — skipping tailscale up."
+  else
+    info "Running tailscale up…"
+    node_ssh "$name" "sudo tailscale up \
+      --auth-key=${AUTH_KEY} \
+      --hostname=${name} \
+      --accept-dns=false \
+      --accept-routes=false"
+  fi
 
   ts_ip=$(node_ssh "$name" "tailscale ip -4 2>/dev/null" || true)
   info "Tailscale IP: ${ts_ip:-<check admin console>}"

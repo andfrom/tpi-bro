@@ -4,7 +4,7 @@ This directory is the platform repo Flux reconciles against, per [ADR-0005](../d
 
 ## Structure
 
-- `flux-system/` — the bootstrap `GitRepository` + `Kustomization` that point Flux at this repo and at `apps/`. Applied once via `flux install` + `kubectl apply -f gitops/flux-system/gotk-sync.yaml`; Flux reconciles it continuously from here on.
+- `flux-system/` — the bootstrap `GitRepository` + `Kustomization` that point Flux at this repo and at `apps/`. Applied once via `scripts/install-gitops.sh` (which wraps `flux install`, the deploy-key secret, and `kubectl apply -f gitops/flux-system/gotk-sync.yaml`); Flux reconciles it continuously from here on.
 - `apps/` — where workload manifests (Kustomize overlays, `HelmRelease` CRs) go. Flux prunes anything removed from here, so nothing should be added that isn't meant to be cluster-managed.
 
 ## Adding a workload

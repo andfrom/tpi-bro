@@ -128,6 +128,15 @@ curl http://rk1-node1:5000/v2/_catalog   # Phase A registry only — HTTP, ephem
 
 ## Step 4 — Run Phase B (k3s + persistent registry + storage)
 
+> **One-command alternative:** `./scripts/bootstrap-operational.sh` runs this
+> step AND everything after it (resource policy, capability labels, the full
+> Tailscale mesh, GitOps, Ollama, monitoring), ending with the cluster health
+> check green. It's staged and resumable (`--from`/`--to`/`--dry-run`), does a
+> preflight that lists every missing tool/credential up front, and pauses once
+> for the one manual action (approving Tailscale subnet routes in the admin
+> console). Steps 4–5 below describe the same ground piecewise, for running or
+> re-running things individually.
+
 ```bash
 ./scripts/bootstrap-phase-b.sh --dry-run   # preview
 ./scripts/bootstrap-phase-b.sh             # real run — B0 → B2

@@ -282,6 +282,19 @@ stage_enable_auth() {
 
 stage_migrate_pvc() {
   say "Migrating registry PVC from eMMC (local-path) to SSD (local-ssd)…"
+
+  # Idempotence gate: if the PVC is already on local-ssd there is nothing to
+  # migrate — and re-running the migration anyway would uninstall/reinstall
+  # the registry and DESTROY all pushed images. Critical for orchestrated
+  # re-runs (bootstrap-operational.sh), where --yes suppresses the prompt.
+  local current_sc
+  current_sc=$(kubectl get pvc registry-data -n registry \
+    -o jsonpath='{.spec.storageClassName}' 2>/dev/null || true)
+  if [[ "$current_sc" == "local-ssd" ]]; then
+    info "Registry PVC already on local-ssd — nothing to migrate, skipping."
+    return 0
+  fi
+
   if (( DRY )); then
     info "[dry-run] Would: helm uninstall registry -n registry --wait"
     info "[dry-run] Would: helm upgrade --install registry … --set persistence.storageClass=local-ssd"

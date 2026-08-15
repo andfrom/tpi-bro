@@ -61,3 +61,8 @@ STATE_FILE=./bootstrap-state.kv
 # SD card on BMC for storing images (--flash bmc):
 # BMC_IMAGE_DIR=/mnt/sdcard/tpi-images
 # BMC_SDCARD_DEV=  (blank = auto-detect largest unmounted ext2/3/4 mmcblk partition)
+
+# Optional: model for install-ollama.sh / bootstrap-operational.sh to pull on
+# each Ollama instance after deploy (e.g. llama3.2:1b). Blank = deploy Ollama
+# without pulling any model.
+# OLLAMA_MODEL=

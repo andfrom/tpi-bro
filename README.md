@@ -61,8 +61,18 @@ cp bootstrap-config.kv.example bootstrap-config.kv && $EDITOR bootstrap-config.k
 
 ./scripts/bootstrap-turingpi-cluster.exp --dry-run --phase A   # preview
 ./scripts/bootstrap-turingpi-cluster.exp --phase A             # Phase A: flash, name, network (~1h)
-./scripts/bootstrap-phase-b.sh                                 # Phase B: k3s, registry, storage
+./scripts/bootstrap-operational.sh                             # everything else, one command:
+                                                               #   k3s, registry, storage, resource
+                                                               #   policy, capability labels, Tailscale
+                                                               #   mesh, GitOps, Ollama, monitoring —
+                                                               #   ends with the health check green
 ```
+
+`bootstrap-operational.sh` is staged and resumable (`--from`/`--to`/`--dry-run`);
+a failed stage prints the exact resume command, and re-running the whole chain
+against a built cluster is safe — every stage is idempotent. Prefer smaller
+steps? `./scripts/bootstrap-phase-b.sh` still runs just the Phase B core, and
+each stage's underlying script can be run on its own.
 
 Phase B (k3s + persistent registry + NVMe + Ollama) and Phase D (example agents + monitoring) are complete. See [docs/ROADMAP.md](docs/ROADMAP.md) for current state.
 

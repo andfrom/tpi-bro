@@ -101,6 +101,22 @@ external orchestrator or producer — the property that makes the cluster
 usable as a decoupled, general execution tier. E-01 is therefore the head
 of the whole track (and follows the bring-up orchestrator in sequencing).
 
+**Design principle — focus is band rotation, never priority escalation.**
+Priorities are a small fixed set of bands (`interactive`/`background`
+today); a focus switch *reassigns* which task occupies which band — evict +
+requeue the demoted task, admit the promoted one — and never increments a
+value. This is what makes unbounded focus ping-pong between long-running
+tasks safe: there is no counter to exhaust (the failure mode of
+`nice`-style schemes where each switch must "up the ante"). Kubernetes
+enforces the shape: `priorityClassName` is immutable on a running pod, so
+escalation-in-place is impossible by construction, and preemption triggers
+on strictly-higher priority only — equal-band work can never displace the
+focused task. Two corollaries: long-running work must be resumable (chunked
+through the queue; eviction loses at most a chunk), and focus must always
+be expressed as a band *difference* — a dispatcher that enqueues "focused"
+work at the running work's own band has silently broken switching (pinned
+by an E-04 test scenario below).
+
 ### E-01: Deploy KEDA + Redis job queue
 
 **Status:** TODO
@@ -151,6 +167,21 @@ At minimum the validation should cover:
   shuffled across nodes.
 - A saturated warm node: warm node is at capacity; job falls through to cold
   capable node rather than queuing behind the warm one.
+- **Focus ping-pong without escalation:** two long-running interruptible
+  workloads, focus alternated between them N times (N ≥ 10). Assert that
+  (a) every switch completes via eviction + requeue of the demoted task and
+  admission of the promoted one, (b) the set of PriorityClass values in use
+  never grows — priorities are the fixed bands, reassigned, never
+  incremented (there is no "nice counter" to exhaust; see the band-rotation
+  principle in the section preamble above), and (c) the demoted task still
+  makes progress on leftover capacity (background is deprioritized, not
+  suspended).
+- **Equal-priority is inert:** dummy work admitted at the *same* band as
+  the currently focused work never preempts it (k8s preempts on strictly
+  higher priority only) — and, the flip side, a focus switch implemented
+  without a band difference silently does nothing. The test pins both
+  behaviors so a future dispatcher can't regress into same-band "focus"
+  semantics.
 
 Results should be recorded in a dedicated benchmark document with wall-clock
 times for warm vs. cold placement.
