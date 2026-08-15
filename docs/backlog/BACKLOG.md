@@ -78,6 +78,24 @@ with `--dry-run` on a live node, then proceed with the hardware swap.
 
 ---
 
+## Test Harness
+
+### T-01: Remaining hardware-less test gaps (post-release)
+From the 2026-08-16 pre-release audit — none are release gates:
+- kubeconform on `gitops/apps` with CRD schemas (datreeio catalog) +
+  `promtool check rules` on the PrometheusRule exprs (its known silent
+  failure: a dropped `release:` label).
+- Wire `install-gitops.sh --verify` into check-cluster as C20 (it is
+  already a real assertion); convert `install-monitoring.sh --verify`
+  from status printer to assertion first if it should ever gate.
+- Exercise `run-focus-demo.sh scenario/status/transcript/uninstall`
+  (today only the Suite-5 fixture path is exercised); lint the inline
+  worker script in `charts/focusdemo/templates/worker-script.yaml`.
+- A live idempotence double-run of `bootstrap-operational.sh` against a
+  converged cluster (the README claims it; only dry-run-tested today).
+
+---
+
 ## Documentation
 
 ### DOC-04: Jetson Orin Nano / CM4 support
