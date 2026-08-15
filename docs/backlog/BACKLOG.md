@@ -121,9 +121,8 @@ by an E-04 test scenario below).
 
 ### E-01: Deploy KEDA + Redis job queue
 
-**Status:** DONE 2026-08-15 — kept here (contra the finished-items
-convention) only because three items below reference it as their blocker;
-remove once those reference the artifacts instead. Delivered: KEDA in
+**Status:** DONE 2026-08-15 — kept briefly (contra the finished-items
+convention) while E-04 still references it; remove when E-04 lands. Delivered: KEDA in
 `keda`, Redis (`redis:7-alpine`, `requirepass`, appendonly, PVC on
 `local-ssd`, `interactive` priority band) in `jobqueue` via
 `charts/jobqueue`, one list key per job type + one `ScaledJob` per type,
@@ -134,23 +133,16 @@ the producer obligation that all work be chunked/interruptible):
 **ADR-0029**. Install/verify: `scripts/install-jobqueue.sh` (also a
 `bootstrap-operational.sh` stage).
 
-### E-03: Interruptible workload eviction init container
-
-**Status:** TODO — unblocked (E-01 done)
-
-Implement the step-2 eviction logic from ADR-0022 as a reusable init container
-image in tagx. The init container:
-1. Queries nodes matching the parent job's `nodeAffinity` capability labels
-2. Finds running pods labelled `tpi-bro/interruptible: "true"` on those nodes
-3. Issues graceful deletes if the parent pod is pending due to resource contention
-
-Requires a ClusterRole with `pods/get`, `pods/list`, `pods/delete` and a
-ServiceAccount bound to it, scoped per namespace. Add to the whisper chart
-(`charts/whisper/`) as the first consumer.
-
 ### E-04: Affinity scheduling validation
 
-**Status:** TODO — unblocked (E-01 done, E-02 done)
+**Status:** IN PROGRESS (runnable subset) / partially blocked on E-07.
+The band/priority scenarios (focus ping-pong without escalation, equal-band
+inertness, background progress on slack) are runnable now against the E-01
+queue + focus-demo machinery. The warm/cold affinity scenarios below require
+warm-model routing to exist first — see E-07. E-03 and E-05 were closed by
+**ADR-0030** (no dispatcher daemon; native preemption + TERM-trap requeue
+supersede the eviction init container; `tpi-bro/interruptible` survives as
+the safe-to-evict contract marker).
 
 Dedicated test pass for the model affinity scheduling behaviour described in
 ADR-0027. Specific test scenarios are defined (tracked separately by owner);
@@ -187,40 +179,15 @@ At minimum the validation should cover:
 Results should be recorded in a dedicated benchmark document with wall-clock
 times for warm vs. cold placement.
 
-### E-05: Orchestrator state management — single query model
+### E-07: Warm-model affinity implementation
 
-**Status:** TODO — unblocked (E-01 done, E-02 done)
-
-The dispatcher that implements ADR-0026 (parallel dispatch) and ADR-0027
-(affinity) needs to know — at dispatch time — which nodes are capable, which are
-warm (model loaded), and which have free capacity. The design question is whether
-to query all nodes individually at dispatch time or to rely on a single
-authoritative state source.
-
-k3s maintains all cluster state in etcd and exposes it via the Kubernetes API
-server. A single `kubectl get pods,nodes --all-namespaces -o wide` (or
-equivalent API call) returns everything needed in one round trip: node labels
-(capability), pod labels (`tpi-bro/model-loaded`, `tpi-bro/interruptible`),
-pod phase (Running/Pending/Succeeded), and resource requests vs. allocatable.
-
-**Questions to investigate:**
-
-1. Is the k3s API server the sufficient single state source, or does the warm-
-   node label on a model-serving pod go stale before the pod actually has the
-   model in DRAM? (Startup race: pod is Running but model load takes 25s.)
-2. Should the dispatcher use a `watch` stream on pod and node events to maintain
-   an in-process state cache, or re-query on every dispatch request?
-3. At the current cluster size (4 nodes), does per-dispatch re-query latency
-   matter? At what scale does a watch-based cache become necessary?
-4. Does KEDA's internal state tracking (queue depth → replica count) overlap
-   with anything a custom dispatcher would do, or are they entirely separate
-   concerns?
-
-**Expected output:** a documented dispatch query pattern (API call(s), fields
-read, decision logic) that becomes the implementation contract for the dispatch
-layer. No per-node SSH at dispatch time — a single API server query only.
-
----
+**Status:** TODO — created by ADR-0030 as the implementation half of
+ADR-0027's design. Worker-written `tpi-bro/model-loaded=<model>` node labels
+(set only AFTER the model is actually in memory — never inferred from pod
+phase; advisory on crash-staleness), plus `preferredDuringScheduling` node
+affinity in model-bearing job templates, plus the E-04 warm/cold validation
+scenarios that unblock once this exists. Relates to E-06 (tagx image labels
+could eventually feed the model identity automatically).
 
 ### E-06: Consume tagx's deployment-manifest image labels
 
