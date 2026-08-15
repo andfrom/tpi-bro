@@ -50,13 +50,18 @@ transcript out, on both paths:
   no cache) — much slower than real-time for this exact configuration.
   KV-cache decoder variants fix that: the full self-attention KV-cache
   decoder (**W-03**) now runs correctly on hardware at ~2.0 s/step —
-  **~2.5× measured** over the naive decoder, with a further ~1.5× projected
-  from FP16 input feeds — after a two-day hunt for a genuine runtime bug
-  (the vendor's runtime silently drops native-layout inputs; see
-  [RKNN-SA-KV-DECODER-BUG.md](RKNN-SA-KV-DECODER-BUG.md)). Until that's
-  wired into the chart (it currently lives behind a `--shim` flag and a
-  debug-built model), the honest recommendation for anything
-  latency-sensitive is still CPU, not NPU.
+  **~2.5× measured** over the naive decoder (a further ~1.10× measured
+  from FP16 input feeds, not the ~1.5× once projected) — after a two-day
+  hunt for a genuine runtime bug (the vendor's runtime silently drops
+  native-layout inputs; see
+  [RKNN-SA-KV-DECODER-BUG.md](RKNN-SA-KV-DECODER-BUG.md)). It's wired
+  into `charts/whisper/` (`rknn.decoder: sa-kv`), but even so, the honest
+  recommendation for anything latency-sensitive is still CPU, not NPU.
+  And the ceiling is hard: `medium` is the largest model whose NPU decoder
+  can even *initialize* — large-v3's 1.77 GB decoder converts fine but
+  `rknn_init` allocates >20 GB (>12× the model size) and, uncapped, wedges
+  the entire node at kernel level until a BMC power-cycle (see
+  [HARDWARE-FIRMWARE-ISSUES.md](HARDWARE-FIRMWARE-ISSUES.md)).
 
 **Small LLM inference via Ollama** (CPU-only; NPU LLM support is
 unexplored, tracked as [R-01](backlog/BACKLOG.md)) works, but "works" is

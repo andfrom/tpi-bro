@@ -165,3 +165,32 @@ below the ~1.5× projected in tagx's live-transcription notes — that
 projection came from a deleted script and does not reproduce through
 `rknnlite.inference()`; a real 1.5× likely requires the zero-copy
 pass-through C-API path.
+
+## Postscript: the large-v3 attempt (2026-08-15)
+
+With the shim proven at medium, the same pipeline was run for large-v3
+(32 layers / 20 heads / 1280 d_model / 128 mels): export and conversion
+succeeded on-cluster (1.77 GB `.rknn`, simulator pipeline OK — note the
+driver needs `num_languages=100` plumbed to the tokenizer or the task
+token shifts by one). On real hardware it never got as far as this
+document's bug: **`rknn_init` itself is pathological at this model size.**
+
+- Uncapped, initialization consumed effectively all of the RK1's 32 GB and
+  hard-wedged the node at kernel level: ping answered, but sshd and the
+  k8s API were dead for 35+ minutes, the system OOM killer never
+  completed (the Mali driver's OOM notifier logged `0 kB` reclaimable),
+  and recovery required a BMC power-cycle.
+- Re-run under a 20 GB cgroup cap, the init was OOM-killed ~30 s in at
+  **20.9 GB anon-RSS — a >12× blowup over the 1.77 GB model file**
+  (kernel evidence: `Memory cgroup out of memory: Killed process …
+  total-vm:21509288kB, anon-rss:20928968kB`).
+- As with the input-loss bug: zero RKNPU or runtime log lines, and the
+  x86 simulator is immune (the same artifact passes the simulator
+  pipeline).
+
+Verdict: **medium is the practical SA-KV model-size ceiling on
+librknnrt 2.3.2 / 32 GB RK1s.** The 764 MB medium decoder initializes and
+runs in production; the 1.77 GB large-v3 decoder cannot be initialized at
+all. Operational lesson folded into `HARDWARE-FIRMWARE-ISSUES.md`: never
+run RKNN workloads without a memory cap — a runaway init inside a capped
+container costs you the container; uncapped, it costs you the node.

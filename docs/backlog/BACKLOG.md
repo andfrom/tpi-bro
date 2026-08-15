@@ -262,6 +262,35 @@ Bottom line: SA-KV decode is ~2.5× the naive decoder (2.0 s/step vs
 this (zero-copy I/O, smaller live-tier models) belong to tagx's
 live-transcription program, not this repo.
 
+### W-04: Publish prebuilt RKNN model artifacts (verified distribution)
+
+Converting Whisper models to RKNN requires an x86 host, the vendor
+toolkit, and (for large models) hours of conversion time — most users of
+this repo will want prebuilt binaries. Decided distribution model:
+
+- **Bytes on Hugging Face Hub** (purpose-built for multi-GB model
+  binaries: free bandwidth, LFS sha256 per blob, resumable downloads,
+  discoverable). Artifacts are pinned to runtime + target — name per
+  `librknnrt` version and SoC (e.g. `*-rknnrt2.3.2-rk3588.rknn`).
+  Whisper is MIT-licensed; redistribution of derivatives is clean.
+- **Trust anchored in git, not next to the download**: SHA-256 for every
+  artifact is pinned in a committed manifest, and the chart's model-fetch
+  path verifies the hash before use. A checksum beside the download
+  protects nothing; a checksum in the repo the user already cloned is a
+  second channel — the binary can then come from any mirror.
+- Personal/project web pages link the HF repo and display the pinned
+  hashes (a third channel), but never serve the bytes.
+
+Work: create the HF model repo, upload encoder/decoder + manifest per
+model, pin hashes in the tagx/tpi-bro manifests, add hash verification to
+the model-fetch path, document in the whisper chart README.
+
+Scope note (2026-08-15): **medium only.** large-v3 converts but cannot be
+initialized on the hardware — `rknn_init` allocates >12× the model size
+(20.9 GB measured for the 1.77 GB decoder) and, uncapped, wedges the node
+(see `HARDWARE-FIRMWARE-ISSUES.md`). Don't publish artifacts users can't
+run.
+
 ---
 
 ## NPU Characterization
