@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: focusdemo-worker
+data:
+  # Transcription worker for the ADR-0029 contract. One chunk per run:
+  # RPOP → transcribe (faster-whisper, tier from WORKER_TIER) → write
+  # transcript + result + metrics. On SIGTERM (eviction by preemption or a
+  # focus switch), re-enqueues the chunk with attempt+1 and bumps the
+  # evicted counter — the demo's "chunks that had to run again".
+  #
+  # Talks Redis over a minimal stdlib RESP client because the whisper image
+  # ships no redis library; jobs are small JSON with base64 audio (~640 KB
+  # for a 15 s 16 kHz mono chunk), well within Redis comfort.
+  worker.py: |
+    import base64, json, os, signal, socket, sys, tempfile
+
+    HOST = os.environ["REDIS_HOST"]
+    PORT = int(os.environ.get("REDIS_PORT", "6379"))
+    PASSWORD = os.environ["REDIS_PASSWORD"]
+    TIER = os.environ["WORKER_TIER"]            # "small" | "medium"
+    QUEUE = f"jobs:transcribe.{TIER}"
+    RESULT_TTL = int(os.environ.get("RESULT_TTL", "3600"))
+
+    class R:
+        def __init__(self):
+            self.s = socket.create_connection((HOST, PORT), timeout=30)
+            self.f = self.s.makefile("rb")
+            self.cmd("AUTH", PASSWORD)
+
+        def cmd(self, *args):
+            out = [b"*%d\r\n" % len(args)]
+            for a in args:
+                b = a if isinstance(a, bytes) else str(a).encode()
+                out.append(b"$%d\r\n%s\r\n" % (len(b), b))
+            self.s.sendall(b"".join(out))
+            return self._reply()
+
+        def _reply(self):
+            line = self.f.readline()
+            t, body = line[:1], line[1:-2]
+            if t == b"+": return body.decode()
+            if t == b":": return int(body)
+            if t == b"-": raise RuntimeError(body.decode())
+            if t == b"$":
+                n = int(body)
+                if n == -1: return None
+                data = self.f.read(n); self.f.read(2)
+                return data
+            if t == b"*":
+                n = int(body)
+                return None if n == -1 else [self._reply() for _ in range(n)]
+            raise RuntimeError(f"bad reply {line!r}")
+
+    r = R()
+    raw = r.cmd("RPOP", QUEUE)
+    if raw is None:
+        sys.exit(0)  # lost the pop race — normal
+
+    job = json.loads(raw)
+    jid = job["id"]
+    p = job["payload"]
+    session, idx = p["session"], p["idx"]
+    p["attempt"] = int(p.get("attempt", 0))
+
+    def evicted(signum, frame):
+        # Requeue at the pop end so the chunk re-runs promptly, count it,
+        # and exit — this is band-rotation eviction behaving as designed.
+        p2 = dict(p); p2["attempt"] = p["attempt"] + 1
+        r.cmd("RPUSH", QUEUE, json.dumps({"id": jid, "payload": p2}))
+        r.cmd("INCR", f"metrics:evicted:transcribe.{TIER}")
+        sys.exit(143)
+
+    signal.signal(signal.SIGTERM, evicted)
+
+    wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    wav.write(base64.b64decode(p["audio_b64"])); wav.close()
+
+    from faster_whisper import WhisperModel
+    model = WhisperModel(TIER, device="cpu", compute_type="int8",
+                         download_root=os.environ.get("WHISPER_CACHE", "/models"))
+    segments, _ = model.transcribe(wav.name,
+                                   language=p.get("language", "en"),
+                                   beam_size=1 if TIER == "small" else 5)
+    # Consume per-segment: keeps Python-level checkpoints frequent so the
+    # SIGTERM handler can run promptly mid-transcription.
+    text = " ".join(s.text.strip() for s in segments).strip()
+
+    # Done — disarm eviction, then publish.
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    r.cmd("HSET", f"transcript:{session}:{TIER}", str(idx), text)
+    r.cmd("INCR", f"metrics:completed:transcribe.{TIER}")
+    r.cmd("SET", f"result:{jid}",
+          json.dumps({"ok": True, "tier": TIER, "idx": idx, "text": text}),
+          "EX", RESULT_TTL)
+
+    if TIER == "small":
+        # Tiering: the live tier hands the same chunk to the refinement
+        # tier THROUGH THE QUEUE — the async catch-up pass (always
+        # background band) that later upgrades the transcript.
+        ref = {"id": f"{jid}-med",
+               "payload": {"session": session, "idx": idx, "attempt": 0,
+                            "language": p.get("language", "en"),
+                            "audio_b64": p["audio_b64"]}}
+        r.cmd("LPUSH", "jobs:transcribe.medium", json.dumps(ref))

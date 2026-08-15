@@ -45,8 +45,16 @@ pathway), or simply as a small, low-power processing machine for whatever
 your own scripts want to enqueue. The architecture and rationale live in
 [ADR-0028](docs/adr/ADR-0028-job-queue-as-sole-external-boundary.md) and
 [ADR-0022](docs/adr/ADR-0022-event-driven-scheduling-and-interruptible-workloads.md);
-the build-out is tracked as E-01–E-06 in
-[the backlog](docs/backlog/BACKLOG.md).
+the contract itself is
+[ADR-0029](docs/adr/ADR-0029-job-queue-contract-v1.md), and the build-out
+is tracked as E-01–E-06 in [the backlog](docs/backlog/BACKLOG.md).
+
+**See it happen:** [docs/FOCUS-DEMO.md](docs/FOCUS-DEMO.md) runs two
+competing tasks — tiered near-realtime speech transcription vs. a chunked
+compute job — through the queue, switches "focus" between them live (fixed
+priority bands rotating, evicted chunks re-queuing themselves), and puts
+the whole thing on a Grafana dashboard: `./scripts/run-focus-demo.sh
+scenario`.
 
 ## Getting started
 

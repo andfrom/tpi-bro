@@ -1,0 +1,80 @@
+# Task B: chunked synthetic compute. Each job pops one chunk
+# ({id, payload:{seconds, attempt}}), burns CPU for `seconds` in 1 s slices
+# (so the TERM trap fires promptly between slices), then reports. Evicted
+# chunks requeue themselves with attempt+1 — same contract as transcription.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: crunch
+spec:
+  pollingInterval: 5
+  maxReplicaCount: 1
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTargetRef:
+    backoffLimit: 0
+    template:
+      metadata:
+        labels:
+          app: crunch
+          tpi-bro/interruptible: "true"
+      spec:
+        restartPolicy: Never
+        terminationGracePeriodSeconds: 10
+        priorityClassName: {{ .Values.bands.crunch }}
+        nodeSelector:
+          kubernetes.io/hostname: {{ .Values.arena.node | quote }}
+        containers:
+          - name: worker
+            image: "{{ .Values.redisImage.repository }}:{{ .Values.redisImage.tag }}"
+            imagePullPolicy: {{ .Values.redisImage.pullPolicy }}
+            env:
+              - name: REDIS_HOST
+                value: {{ .Values.redis.host | quote }}
+              - name: REDIS_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Values.redis.authSecretName }}
+                    key: password
+              - name: RESULT_TTL
+                value: {{ .Values.resultTtl | quote }}
+            command:
+              - sh
+              - -c
+              - |
+                r() { redis-cli --no-auth-warning -h "$REDIS_HOST" -a "$REDIS_PASSWORD" "$@"; }
+                ITEM=$(r RPOP jobs:crunch)
+                [ -z "$ITEM" ] && exit 0
+                ID=$(printf '%s' "$ITEM" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+                SECS=$(printf '%s' "$ITEM" | sed -n 's/.*"seconds"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p')
+                ATTEMPT=$(printf '%s' "$ITEM" | sed -n 's/.*"attempt"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p')
+                : "${SECS:=20}" "${ATTEMPT:=0}"
+                evict() {
+                  r RPUSH jobs:crunch "{\"id\":\"$ID\",\"payload\":{\"seconds\":$SECS,\"attempt\":$((ATTEMPT + 1))}}" > /dev/null
+                  r INCR metrics:evicted:crunch > /dev/null
+                  exit 143
+                }
+                trap evict TERM
+                i=0
+                while [ "$i" -lt "$SECS" ]; do
+                  # ~1 s of real CPU work per slice, trap-checkable in between
+                  dd if=/dev/urandom bs=1M count=24 2>/dev/null | sha256sum > /dev/null
+                  i=$((i + 1))
+                done
+                trap - TERM
+                r INCR metrics:completed:crunch > /dev/null
+                r SET "result:$ID" "{\"ok\":true,\"type\":\"crunch\",\"seconds\":$SECS,\"attempt\":$ATTEMPT}" EX "$RESULT_TTL" > /dev/null
+            resources:
+              requests:
+                cpu: {{ .Values.arena.workerCpu | quote }}
+                memory: "64Mi"
+              limits:
+                memory: "256Mi"
+  triggers:
+    - type: redis
+      metadata:
+        address: "{{ .Values.redis.host }}:{{ .Values.redis.port }}"
+        listName: jobs:crunch
+        listLength: "1"
+      authenticationRef:
+        name: {{ .Values.redis.triggerAuthName }}

@@ -1,0 +1,75 @@
+# Grafana dashboard, delivered where kube-prometheus-stack's dashboard
+# sidecar looks for it: a ConfigMap in the `monitoring` namespace labelled
+# grafana_dashboard=1 (the sidecar's default search scope is its own
+# namespace).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: focusdemo-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  focusdemo.json: |
+    {
+      "title": "Focus Demo — job queue band rotation",
+      "uid": "focusdemo",
+      "timezone": "browser",
+      "refresh": "5s",
+      "time": {"from": "now-15m", "to": "now"},
+      "panels": [
+        {
+          "id": 1, "type": "timeseries",
+          "title": "Who holds the arena slot (running workers)",
+          "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"custom": {"fillOpacity": 30}, "min": 0, "max": 1}},
+          "targets": [
+            {"expr": "sum(kube_pod_status_phase{namespace=\"jobqueue\",phase=\"Running\",pod=~\"transcribe-small-.*\"}) or vector(0)", "legendFormat": "task A — live STT (small)"},
+            {"expr": "sum(kube_pod_status_phase{namespace=\"jobqueue\",phase=\"Running\",pod=~\"transcribe-medium-.*\"}) or vector(0)", "legendFormat": "task A — refine (medium)"},
+            {"expr": "sum(kube_pod_status_phase{namespace=\"jobqueue\",phase=\"Running\",pod=~\"crunch-.*\"}) or vector(0)", "legendFormat": "task B — crunch"}
+          ]
+        },
+        {
+          "id": 2, "type": "timeseries",
+          "title": "Queue depth per job type",
+          "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"min": 0}},
+          "targets": [
+            {"expr": "redis_key_size{key=~\"jobs:.*\"}", "legendFormat": "{{`{{key}}`}}"}
+          ]
+        },
+        {
+          "id": 3, "type": "timeseries",
+          "title": "Chunks evicted (had to run again)",
+          "gridPos": {"x": 0, "y": 8, "w": 8, "h": 8},
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"min": 0}},
+          "targets": [
+            {"expr": "redis_key_value{key=~\"metrics:evicted:.*\"}", "legendFormat": "{{`{{key}}`}}"}
+          ]
+        },
+        {
+          "id": 4, "type": "timeseries",
+          "title": "Chunks completed",
+          "gridPos": {"x": 8, "y": 8, "w": 8, "h": 8},
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"min": 0}},
+          "targets": [
+            {"expr": "redis_key_value{key=~\"metrics:completed:.*\"}", "legendFormat": "{{`{{key}}`}}"}
+          ]
+        },
+        {
+          "id": 5, "type": "timeseries",
+          "title": "Where demo workers run (node)",
+          "gridPos": {"x": 16, "y": 8, "w": 8, "h": 8},
+          "datasource": "Prometheus",
+          "fieldConfig": {"defaults": {"min": 0}},
+          "targets": [
+            {"expr": "sum by (node) (kube_pod_info{namespace=\"jobqueue\",pod=~\"(transcribe|crunch)-.*\"})", "legendFormat": "{{`{{node}}`}}"}
+          ]
+        }
+      ],
+      "schemaVersion": 39
+    }

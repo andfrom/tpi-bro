@@ -1,0 +1,67 @@
+# redis_exporter: queue depths (jobs:*) and demo counters (metrics:*) into
+# Prometheus, so the Grafana dashboard can chart focus switches live.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: focusdemo-redis-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: focusdemo-redis-exporter
+  template:
+    metadata:
+      labels:
+        app: focusdemo-redis-exporter
+    spec:
+      containers:
+        - name: exporter
+          image: {{ .Values.exporter.image | quote }}
+          args:
+            - --redis.addr=redis://{{ .Values.redis.host }}:{{ .Values.redis.port }}
+            - --check-keys={{ .Values.exporter.checkKeys }}
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.redis.authSecretName }}
+                  key: password
+          ports:
+            - name: metrics
+              containerPort: 9121
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              memory: "64Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: focusdemo-redis-exporter
+  labels:
+    app: focusdemo-redis-exporter
+spec:
+  selector:
+    app: focusdemo-redis-exporter
+  ports:
+    - name: metrics
+      port: 9121
+      targetPort: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: focusdemo-redis-exporter
+  labels:
+    # kube-prometheus-stack's default serviceMonitorSelector matches on the
+    # Helm release label — without this the exporter is never scraped.
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: focusdemo-redis-exporter
+  endpoints:
+    - port: metrics
+      interval: 10s

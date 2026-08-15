@@ -1,0 +1,50 @@
+# Reuses the jobqueue release's Redis + auth (install into the same namespace).
+redis:
+  host: jobqueue.jobqueue.svc.cluster.local
+  port: 6379
+  authSecretName: jobqueue-redis-auth
+  triggerAuthName: jobqueue-redis-trigger-auth
+
+# The contention arena: every demo worker is pinned to ONE node and requests
+# enough CPU that only one worker fits at a time. That single slot is what
+# makes focus switching legible: the focused band's Pending worker preempts
+# the running background worker via ordinary k8s priority preemption.
+arena:
+  node: rk1-node3
+  workerCpu: "4"
+
+# Whisper CPU image (tagx faster-whisper app) from the cluster registry.
+whisperImage:
+  repository: rk1-node1:5000/tagx/whisper-stt
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Plain redis image doubles as the crunch worker (sh + redis-cli).
+redisImage:
+  repository: redis
+  tag: "7-alpine"
+  pullPolicy: IfNotPresent
+
+# Initial band assignment (task A focused). scripts/run-focus-demo.sh focus
+# a|b rotates these live by patching the ScaledJobs — bands are the fixed
+# set {interactive, background}; only the assignment ever changes.
+bands:
+  transcribeSmall: interactive
+  transcribeMedium: background   # refinement tier is async catch-up by design
+  crunch: background
+
+# Whisper model cache (small + medium download here on first use; the PVC
+# binds to the arena node, shared by all transcribe workers there).
+modelCache:
+  size: 10Gi
+  storageClass: local-ssd
+
+resultTtl: 3600
+
+exporter:
+  # Plain (non-alpine) tags are the multi-arch ones — the -alpine variants
+  # are amd64-only and die with "exec format error" on ARM64.
+  image: oliver006/redis_exporter:v1.62.0
+  # Exposes list lengths for jobs:* and numeric values for metrics:* so the
+  # dashboard can chart queue depth, completed chunks, and evictions.
+  checkKeys: "jobs:*,metrics:*"

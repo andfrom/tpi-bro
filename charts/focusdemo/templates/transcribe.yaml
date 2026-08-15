@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: focusdemo-models
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.modelCache.storageClass | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.modelCache.size | quote }}
+{{- range $tier, $band := dict "small" .Values.bands.transcribeSmall "medium" .Values.bands.transcribeMedium }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: transcribe-{{ $tier }}
+spec:
+  pollingInterval: 5
+  maxReplicaCount: 1
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTargetRef:
+    # backoffLimit 0: an evicted worker has already requeued its chunk
+    # itself (SIGTERM trap) — a Job-level retry would double-process.
+    backoffLimit: 0
+    template:
+      metadata:
+        labels:
+          app: transcribe-{{ $tier }}
+          tpi-bro/interruptible: "true"
+      spec:
+        restartPolicy: Never
+        terminationGracePeriodSeconds: 25
+        priorityClassName: {{ $band }}
+        nodeSelector:
+          kubernetes.io/hostname: {{ $.Values.arena.node | quote }}
+        containers:
+          - name: worker
+            image: "{{ $.Values.whisperImage.repository }}:{{ $.Values.whisperImage.tag }}"
+            imagePullPolicy: {{ $.Values.whisperImage.pullPolicy }}
+            command: ["python", "/worker/worker.py"]
+            env:
+              - name: WORKER_TIER
+                value: {{ $tier | quote }}
+              - name: REDIS_HOST
+                value: {{ $.Values.redis.host | quote }}
+              - name: REDIS_PORT
+                value: {{ $.Values.redis.port | quote }}
+              - name: REDIS_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ $.Values.redis.authSecretName }}
+                    key: password
+              - name: WHISPER_CACHE
+                value: /models
+              - name: RESULT_TTL
+                value: {{ $.Values.resultTtl | quote }}
+            volumeMounts:
+              - name: worker-script
+                mountPath: /worker
+              - name: models
+                mountPath: /models
+            resources:
+              requests:
+                cpu: {{ $.Values.arena.workerCpu | quote }}
+                memory: "1Gi"
+              limits:
+                memory: {{ if eq $tier "medium" }}"6Gi"{{ else }}"3Gi"{{ end }}
+        volumes:
+          - name: worker-script
+            configMap:
+              name: focusdemo-worker
+          - name: models
+            persistentVolumeClaim:
+              claimName: focusdemo-models
+  triggers:
+    - type: redis
+      metadata:
+        address: "{{ $.Values.redis.host }}:{{ $.Values.redis.port }}"
+        listName: jobs:transcribe.{{ $tier }}
+        listLength: "1"
+      authenticationRef:
+        name: {{ $.Values.redis.triggerAuthName }}
+{{- end }}

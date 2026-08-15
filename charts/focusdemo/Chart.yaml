@@ -1,0 +1,14 @@
+apiVersion: v2
+name: focusdemo
+description: >-
+  Focus-switching demo on the ADR-0028/0029 job queue: tiered audio
+  transcription (task A — near-realtime small tier + async medium
+  refinement) vs. a chunked compute task (task B), contending for a
+  one-slot arena where the focused band preempts natively and evicted
+  chunks re-enqueue themselves. Ships a redis_exporter + Grafana dashboard
+  so the switching is visible live. Driven by scripts/run-focus-demo.sh.
+  Installs into the jobqueue namespace (reuses its Redis secret and KEDA
+  TriggerAuthentication).
+type: application
+version: 0.1.0
+appVersion: "0.1"
