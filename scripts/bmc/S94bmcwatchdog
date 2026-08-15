@@ -1,5 +1,5 @@
 #!/bin/sh
-# Init script for the C-04 layer-2 BMC node watchdog (tpi-bro).
+# Init script for the tpi-bro BMC node watchdog (docs/SELF-HEALING.md).
 # Installed to /etc/init.d/ on the BMC by scripts/install-bmc-watchdog.sh.
 
 DAEMON=/etc/bmc-watchdog.sh

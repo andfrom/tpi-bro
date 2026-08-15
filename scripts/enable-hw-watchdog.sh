@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C-04 layer 1: arm the RK1's on-SoC hardware watchdog on every node.
+# Self-healing layer 1 (docs/SELF-HEALING.md): arm the RK1 on-SoC hardware watchdog.
 #
 # The RK3588 has a Synopsys DW watchdog (watchdog@feaf0000, dw_wdt driver
 # compiled into the Ubuntu rockchip kernel) but the device-tree node ships
@@ -19,14 +19,20 @@
 # reboot nodes (do that one node at a time, control plane last). Idempotent.
 #
 # Usage:
-#   ./enable-hw-watchdog.sh                # configure all nodes
-#   ./enable-hw-watchdog.sh rk1-node3      # configure one node
-#   ./enable-hw-watchdog.sh --verify       # check armed state on all nodes
+#   ./enable-hw-watchdog.sh                  # configure all nodes
+#   ./enable-hw-watchdog.sh rk1-node3        # configure one node
+#   ./enable-hw-watchdog.sh --verify         # check armed state on all nodes
+#   ./enable-hw-watchdog.sh --rolling-reboot # reboot workers then control
+#                                            # plane, waiting for k8s Ready
+#                                            # between each; then --verify
 
 set -euo pipefail
 
 NODES=(rk1-node1 rk1-node2 rk1-node3 rk1-node4)
+# Reboot order: workers first, control plane (node1) last.
+REBOOT_ORDER=(rk1-node2 rk1-node3 rk1-node4 rk1-node1)
 DO_VERIFY=0
+DO_ROLLING=0
 
 say()  { echo "==> $*"; }
 info() { echo "    $*"; }
@@ -34,6 +40,7 @@ info() { echo "    $*"; }
 if [[ $# -gt 0 ]]; then
   case $1 in
     --verify) DO_VERIFY=1 ;;
+    --rolling-reboot) DO_ROLLING=1 ;;
     rk1-node*) NODES=("$@") ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
@@ -62,6 +69,29 @@ if [[ $DO_VERIFY -eq 1 ]]; then
     verify_node "$node" || { info "NOT ARMED"; rc=1; }
   done
   exit $rc
+fi
+
+if [[ $DO_ROLLING -eq 1 ]]; then
+  # A node that hits the warm-reboot PCIe flake (HARDWARE-FIRMWARE-ISSUES.md)
+  # never comes back on its own — that's what the 12-minute per-node timeout
+  # is for. If it trips: cold-cycle via BMC (or let the BMC watchdog do it)
+  # and re-run this mode.
+  for node in "${REBOOT_ORDER[@]}"; do
+    say "Rebooting ${node}"
+    $SSH "ubuntu@${node}" "sudo reboot" </dev/null 2>/dev/null || true
+    sleep 15
+    deadline=$(( $(date +%s) + 720 ))
+    until $SSH "ubuntu@${node}" true </dev/null 2>/dev/null; do
+      [[ $(date +%s) -gt $deadline ]] && { echo "ERROR: ${node} not back after 12 min (PCIe flake? cold-cycle it and re-run)"; exit 1; }
+      sleep 10
+    done
+    until kubectl get node "$node" 2>/dev/null | grep -qw Ready; do
+      [[ $(date +%s) -gt $deadline ]] && { echo "ERROR: ${node} up but not k8s Ready after 12 min"; exit 1; }
+      sleep 5
+    done
+    info "${node} Ready"
+  done
+  exec "$0" --verify
 fi
 
 for node in "${NODES[@]}"; do

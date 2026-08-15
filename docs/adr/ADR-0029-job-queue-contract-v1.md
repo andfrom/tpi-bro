@@ -73,6 +73,21 @@ about compute). How those producers structure their work into resumable
 chunks is their design problem, acknowledged as future work on their side
 of the fence.
 
+**Hard kills are a normal event, not an edge case (added 2026-08-16).**
+The SIGTERM-trap requeue in the worker pattern covers *graceful* eviction
+(band rotation, drains). It does not cover hard kills — node power loss,
+kernel panic, or the self-healing watchdogs (`docs/SELF-HEALING.md`)
+power-cycling a wedged node, which is
+now an *automated* recovery path, not a rare manual one. A hard kill loses
+the in-flight chunk: the job was popped, no result will ever be written,
+and nothing requeues it. This is consistent with at-most-once by choice.
+The producer-facing rule that follows: **a producer that needs
+at-least-once must watch for `result:<id>` never appearing and re-enqueue
+on its own timeout** (payloads are idempotent-by-design under the chunked
+obligation above, so re-running a chunk is always safe). Producers that
+can tolerate a lost chunk (e.g. a transcription tier that will re-cover
+the audio window anyway) simply accept the gap.
+
 A reliable-delivery pattern (`RPOPLPUSH`/`LMOVE` to a per-worker processing
 list with reaper, or Redis Streams with consumer groups) is deliberately
 deferred until a real consumer demonstrates the need — likely alongside

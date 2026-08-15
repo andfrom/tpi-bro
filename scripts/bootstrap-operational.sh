@@ -33,6 +33,12 @@
 #   D04_monitoring      — kube-prometheus-stack; Grafana exposed on Tailnet
 #   E01_jobqueue        — KEDA + Redis job queue + echo demo (the ADR-0028
 #                         boundary; REDIS_PASSWORD auto-generated on first run)
+#   C04_bmc_watchdog    — self-healing outer loop: BMC-resident node watchdog
+#                         (installed BEFORE the hw-watchdog reboots so it
+#                         already guards against the warm-reboot PCIe flake)
+#   C04_hw_watchdog     — self-healing first line: arm the on-SoC hardware
+#                         watchdog (DT overlay + systemd), then a rolling
+#                         reboot (workers first, control plane last)
 #   VERIFY_cluster      — tests/check-cluster.sh; green here == operational
 #
 # Credentials consumed (from ~/.turingpi/credentials.kv):
@@ -82,6 +88,8 @@ STAGES=(
   D01_ollama
   D04_monitoring
   E01_jobqueue
+  C04_bmc_watchdog
+  C04_hw_watchdog
   VERIFY_cluster
 )
 
@@ -249,6 +257,26 @@ do_E01_jobqueue() {
   # preflight for this stage.
   run_stage E01_jobqueue \
     bash "${SCRIPT_DIR}/install-jobqueue.sh" "${DRY_FLAG[@]}"
+}
+
+do_C04_bmc_watchdog() {
+  if (( DRY )); then
+    say "STAGE: C04_bmc_watchdog"
+    info "[dry-run] Would run: install-bmc-watchdog.sh (BMC-resident prober)"
+    return 0
+  fi
+  run_stage C04_bmc_watchdog \
+    bash "${SCRIPT_DIR}/install-bmc-watchdog.sh"
+}
+
+do_C04_hw_watchdog() {
+  if (( DRY )); then
+    say "STAGE: C04_hw_watchdog"
+    info "[dry-run] Would run: enable-hw-watchdog.sh, then --rolling-reboot"
+    return 0
+  fi
+  run_stage C04_hw_watchdog \
+    bash -c "'${SCRIPT_DIR}/enable-hw-watchdog.sh' && '${SCRIPT_DIR}/enable-hw-watchdog.sh' --rolling-reboot"
 }
 
 do_VERIFY_cluster() {

@@ -1,0 +1,48 @@
+# C-04 layer 4 (visibility half): alert when a node is "healthy but hollow".
+#
+# The BMC watchdog's deep probe acts on this state (cold power-cycle); this
+# rule makes the same state — and the watchdog's action window — visible in
+# Prometheus/Grafana/Alertmanager. Counterpart: scripts/bmc/bmc-watchdog.sh.
+#
+# The `release: kube-prometheus-stack` label is what the Prometheus
+# ruleSelector matches — without it the rule is silently ignored.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tpi-bro-node-health
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: tpi-bro.node-health
+      rules:
+        - alert: NodeNvmeMissing
+          # nodes 1-3 carry NVMe (/mnt/ssd); node4 does not (HW-01). A count
+          # below 3 means a node booted without its NVMe enumerating — the
+          # warm-reboot PCIe link-training flake (HARDWARE-FIRMWARE-ISSUES.md).
+          # The BMC watchdog cold-cycles it within ~DEEP_THRESHOLD*INTERVAL;
+          # if this alert stays firing past ~15 min, the watchdog gave up
+          # (cycle cap) and a human is needed.
+          expr: count(node_filesystem_size_bytes{mountpoint="/mnt/ssd"}) < 3
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "A node's NVMe (/mnt/ssd) is missing"
+            description: >-
+              Fewer than 3 nodes report the /mnt/ssd mount. Likely the
+              warm-reboot PCIe link-training flake; check the BMC watchdog log
+              (/mnt/sdcard/bmc-watchdog.log on the BMC) for DEEP-WEDGED /
+              GIVE-UP lines, then tests/check-cluster.sh --quick.
+        - alert: NodeExporterAbsent
+          # Distinguishes "mount missing" from "not being scraped at all".
+          expr: count(up{job="node-exporter"} == 1) < 4
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "node-exporter down on at least one node"
+            description: >-
+              Fewer than 4 node-exporter targets are up — NodeNvmeMissing
+              cannot be trusted while this fires.

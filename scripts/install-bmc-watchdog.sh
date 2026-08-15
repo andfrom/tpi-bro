@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C-04 layer 2: install the BMC-resident node watchdog.
+# Self-healing layers 2+4 (docs/SELF-HEALING.md): install the BMC-resident node watchdog.
 #
 # Pushes scripts/bmc/bmc-watchdog.sh + its init script onto the BMC's
 # persistent overlay (/etc), writes /etc/bmc-watchdog.conf, and starts it.
@@ -73,6 +73,8 @@ case $MODE in
       CONF='INTERVAL=10
 FAIL_THRESHOLD=6
 BOOT_GRACE=180
+DEEP_THRESHOLD=6
+DEEP_GRACE=240
 COOLDOWN=300
 MAX_CYCLES_PER_DAY=10'
       info "TEST thresholds: 6 fails x 10s = ~60s trip"
@@ -80,9 +82,11 @@ MAX_CYCLES_PER_DAY=10'
       CONF='INTERVAL=30
 FAIL_THRESHOLD=10
 BOOT_GRACE=300
+DEEP_THRESHOLD=10
+DEEP_GRACE=600
 COOLDOWN=1800
 MAX_CYCLES_PER_DAY=3'
-      info "PRODUCTION thresholds: 10 fails x 30s = 5 min trip"
+      info "PRODUCTION thresholds: 10 fails x 30s = 5 min trip (ssh + deep)"
     fi
 
     bmc "chmod +x /etc/bmc-watchdog.sh /etc/init.d/S94bmcwatchdog
