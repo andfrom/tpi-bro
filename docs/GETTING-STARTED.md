@@ -32,11 +32,12 @@ Two things worth knowing that aren't obvious from official docs:
 length varies between units, and a too-short bushing can bend the PCB if screwed
 all the way in. Return/replace any heatsink with mismatched bushings.
 
-<!-- TODO: add the PCB-bending and F-panel wiring photos (referenced images
-     were never committed). -->
-**F Panel**: if using the TuringPi ATX case, wire [Power] and [Power LED] per
-the F-panel pin layout printed on the board (see the official TuringPi case
-docs for the diagram).
+![Too-short bushings (circled) let the screws bow the RK1 PCB — visible as the board lifting away from the heatsink](../assets/images/heatsink-bushing-issue.jpg)
+
+**F Panel**: if using the TuringPi ATX case, wire [Power] and [Power LED] to
+the F-panel header (circled below, board edge next to the mPCIe slots):
+
+![TuringPi 2 board with the F-panel header circled — POWER SW and POWER LED connectors attach here](../assets/images/f-panel-pin-configuration.jpg)
 
 If you ever need to factory-reset a node (e.g. lost passwords), move the power
 connector to the reset pins and hold for 10s, then move it back.
