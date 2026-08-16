@@ -34,7 +34,7 @@ all the way in. Return/replace any heatsink with mismatched bushings.
 
 ![Too-short bushings (circled) let the screws bow the RK1 PCB — visible as the board lifting away from the heatsink](../assets/images/heatsink-bushing-issue.jpg)
 
-**F Panel**: if using the TuringPi ATX case, wire [Power] and [Power LED] to
+**F Panel**: if using the [Turing Mini ITX case](https://turingpi.com/product/turing-mini-itx-case/), wire [Power] and [Power LED] to
 the F-panel header (circled below, board edge next to the mPCIe slots):
 
 ![TuringPi 2 board with the F-panel header circled — POWER SW and POWER LED connectors attach here](../assets/images/f-panel-pin-configuration.jpg)

@@ -1,4 +1,4 @@
-![tpi-bro logo - stylized TuringPi Mini ITX case](assets/images/tpi-bro-logo.png)
+![tpi-bro logo - stylized Turing Mini ITX case](assets/images/tpi-bro-logo.png)
 
 # `tpi-bro` &nbsp; – &nbsp; a Turing Pi 2 Cluster Bootstrap project
 
@@ -80,7 +80,7 @@ Details, guards, and the runbook:
 Quick taste, if you already know what you're doing and just need the commands:
 
 ```bash
-git clone https://github.com/your-org/tpi-bro && cd tpi-bro
+git clone https://github.com/andfrom/tpi-bro && cd tpi-bro
 chmod +x scripts/*.sh scripts/*.exp
 cp bootstrap-config.kv.example bootstrap-config.kv && $EDITOR bootstrap-config.kv
 
