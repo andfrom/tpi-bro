@@ -227,6 +227,8 @@ could eventually feed the model identity automatically).
 
 ### W-04: Publish prebuilt RKNN model artifacts (verified distribution)
 
+Decision record: `../adr/ADR-0032-model-artifacts-hub-bytes-git-trust.md`.
+
 Converting Whisper models to RKNN requires an x86 host, the vendor
 toolkit, and (for large models) hours of conversion time — most users of
 this repo will want prebuilt binaries. Decided distribution model:

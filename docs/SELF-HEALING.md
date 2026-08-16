@@ -106,7 +106,11 @@ fresh bring-up gets self-healing by default.
 
 ## See also
 
-- `HARDWARE-FIRMWARE-ISSUES.md` — the two motivating incidents (rknn_init
-  runaway wedge; warm-reboot PCIe link-training flake)
+- `adr/ADR-0031-layered-watchdog-self-healing.md` — the decision record
+  (why BMC-resident, why not in-cluster remediation, the two load-bearing
+  boundaries)
+- `HARDWARE-FIRMWARE-ISSUES.md` — the two motivating incidents (the
+  memory-wedge, later traced to a test-harness bug; warm-reboot PCIe
+  link-training flake)
 - `adr/ADR-0029-job-queue-contract-v1.md` — delivery semantics incl. hard kills
 - `docs/backlog/BACKLOG.md` — S-03 and other future resilience work
