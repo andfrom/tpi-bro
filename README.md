@@ -5,8 +5,8 @@
 > This is a practical, minimal bootstrap to get a [Turing Pi 2](https://turingpi.com/) cluster with 4 [RK1](https://docs.turingpi.com/docs/turing-rk1-specs-and-io-ports) compute modules to a working state fast.
 >
 > * **[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)** &nbsp; – &nbsp; the full installation walkthrough: hardware assembly, prerequisites, flashing, and network setup. Start there.
-> * [Initial bootstrap](#initial-board-and-cluster-bootstrap-expect-flashing-and-network-setup) below covers the same ground (Phase A) at a reference level, for extending the scripts rather than following along step-by-step.
-> * [A GitOps workflow](#handoff-from-bootstrap-expect-to-cluster-orchestration-k8sgitops) handles the rest, K8s orchestration, etc.<br>(These are Phases B through E — from bare k3s all the way up to the queue-fronted execution tier with a live focus-switching demo.)
+> * [Board bring-up](#initial-board-and-cluster-bootstrap-expect-flashing-and-network-setup) below covers the first stage (Expect: flash, name, network) at a reference level, for extending the scripts rather than following along step-by-step.
+> * [Cluster orchestration](#handoff-from-bootstrap-expect-to-cluster-orchestration-k8sgitops) handles the rest — k3s, GitOps, and everything up to the queue-fronted execution tier with a live focus-switching demo.
 >
 > **Disclaimer**: This project has yet to play with Nvidia Jetson (Orin) Nano and CM4 adapters for RPi, so it's not possible to tell if these scripts and instructions will help anyone to get started for such configurations.
 
@@ -75,7 +75,7 @@ Details, guards, and the runbook:
 
 ## Getting started
 
-**→ [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) is the full installation walkthrough** — hardware assembly, prerequisites, Phase A (flash/name/network), Phase B (k3s/registry/storage), Tailscale, and populating the registry with application images. Start there.
+**→ [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) is the full installation walkthrough** — hardware assembly, prerequisites, board bring-up (flash/name/network), cluster setup (k3s/registry/storage), Tailscale, and populating the registry with application images. Start there.
 
 Quick taste, if you already know what you're doing and just need the commands:
 
@@ -85,7 +85,7 @@ chmod +x scripts/*.sh scripts/*.exp
 cp bootstrap-config.kv.example bootstrap-config.kv && $EDITOR bootstrap-config.kv
 
 ./scripts/bootstrap-turingpi-cluster.exp --dry-run --phase A   # preview
-./scripts/bootstrap-turingpi-cluster.exp --phase A             # Phase A: flash, name, network (~1h)
+./scripts/bootstrap-turingpi-cluster.exp --phase A             # board bring-up: flash, name, network (~1h)
 ./scripts/bootstrap-operational.sh                             # everything else, one command:
                                                                #   k3s, registry, storage, resource
                                                                #   policy, capability labels, Tailscale
@@ -97,10 +97,10 @@ cp bootstrap-config.kv.example bootstrap-config.kv && $EDITOR bootstrap-config.k
 `bootstrap-operational.sh` is staged and resumable (`--from`/`--to`/`--dry-run`);
 a failed stage prints the exact resume command, and re-running the whole chain
 against a built cluster is safe — every stage is idempotent. Prefer smaller
-steps? `./scripts/bootstrap-phase-b.sh` still runs just the Phase B core, and
+steps? `./scripts/bootstrap-phase-b.sh` still runs just the cluster core (k3s + registry + storage), and
 each stage's underlying script can be run on its own.
 
-Phase B (k3s + persistent registry + NVMe + Ollama), Phase D (Ollama + monitoring; agent workloads deliberately stay upstream of the queue), and Phase E (job queue + scheduling) are complete. See [docs/ROADMAP.md](docs/ROADMAP.md) for current state.
+Everything above is complete and live: k3s, TLS registry, NVMe storage, Tailscale mesh, GitOps, Ollama, monitoring, the job queue, and the self-healing watchdogs. See [docs/ROADMAP.md](docs/ROADMAP.md) for current state and what's next.
 
 ---
 
@@ -130,7 +130,7 @@ Check out the [open backlog](docs/backlog/BACKLOG.md) for open work items and fu
 
 ## Initial board and cluster bootstrap: Expect (flashing and network setup)
 
-This repo contains a resumable, staged [**Expect**](https://core.tcl-lang.org/expect/index) bootstrap for a [Turing Pi](https://turingpi.com/) ([BMC](https://docs.turingpi.com/docs/turing-pi2-bmc-intro-specs)) + 4× [RK1](https://docs.turingpi.com/docs/turing-rk1-specs-and-io-ports) nodes to reach a wanted board bring up "baseline". The "baselines" are categorized into "Phases" with varying degrees of Docker/Kubernetes capabilities, up to the queue-fronted execution tier described above. E.g., "Phase A" contains
+This repo contains a resumable, staged [**Expect**](https://core.tcl-lang.org/expect/index) bootstrap for a [Turing Pi](https://turingpi.com/) ([BMC](https://docs.turingpi.com/docs/turing-pi2-bmc-intro-specs)) + 4× [RK1](https://docs.turingpi.com/docs/turing-rk1-specs-and-io-ports) nodes to reach a working board bring-up baseline. (Internally the scripts call this stage "Phase A" — the flag is literally `--phase A` — and the cluster-setup scripts that follow keep matching names like `bootstrap-phase-b.sh`; as a reader you only ever deal with the two stages: bring-up, then orchestration.) The bring-up baseline contains
 - Nodes named `rk1-node{1..4}` with a unified password
 - Laptop `/etc/hosts` updated
 - An **ephemeral** (HTTP) Docker registry running on `rk1-node1` with `--restart=always`
@@ -153,24 +153,24 @@ what's in the repo and the stage-by-stage mechanics for anyone extending it.
 | Path | Purpose |
 |------|---------|
 | `scripts/bootstrap-turingpi-cluster.exp` | Main bootstrap Expect script (staged, resumable, `--rediscover` mode) |
-| `scripts/teardown-cluster.exp` | Reverses Phase A — resets nodes to a re-bootstrappable state |
+| `scripts/teardown-cluster.exp` | Reverses the board bring-up — resets nodes to a re-bootstrappable state |
 | `scripts/bootstrap-host-helper.sh` | Manages `/etc/hosts` entries (`hosts-append` / `hosts-remove`) |
-| `scripts/setup-static-ips.sh` | Phase B0: configure static IPs on BMC and all nodes |
-| `scripts/setup-ssh-keys.sh` | Phase B0: distribute SSH key + passwordless sudo to all nodes |
-| `scripts/install-k3s.sh` | Phase B1: install k3s server and agents |
-| `scripts/gen-registry-certs.sh` | Phase B2: generate TLS certificates for the registry |
-| `scripts/install-ca.sh` | Phase B2: install CA cert + containerd mirror config on a node |
-| `scripts/setup-registry.sh` | Phase B2: full orchestration — certs → chart deploy → CA distribute |
-| `scripts/bootstrap-phase-b.sh` | Phase B orchestrator — runs B0→B2 in order; `--from`/`--to` resume; `--dry-run`; `--check` |
-| `charts/registry/` | Helm chart for the persistent Phase B registry |
+| `scripts/setup-static-ips.sh` | Cluster setup: static IPs on BMC and all nodes (stage `B0`) |
+| `scripts/setup-ssh-keys.sh` | Cluster setup: SSH key + passwordless sudo on all nodes (stage `B0`) |
+| `scripts/install-k3s.sh` | Cluster setup: k3s server and agents (stage `B1`) |
+| `scripts/gen-registry-certs.sh` | Cluster setup: TLS certificates for the registry (stage `B2`) |
+| `scripts/install-ca.sh` | Cluster setup: CA cert + containerd mirror config per node (stage `B2`) |
+| `scripts/setup-registry.sh` | Cluster setup: certs → registry chart deploy → CA distribute (stage `B2`) |
+| `scripts/bootstrap-phase-b.sh` | Cluster-core orchestrator — runs stages `B0`→`B2` in order; `--from`/`--to` resume; `--dry-run`; `--check` |
+| `charts/registry/` | Helm chart for the persistent TLS registry |
 | `bin/kubectl` | Vendored `kubectl` binary pinned to the cluster version |
 | `bootstrap-state.kv` | Generated state file — discovered IPs, MACs, BMC address (gitignored) |
 | `bootstrap-config.kv` | Local config overrides — subnet, node count, flash mode, etc. (gitignored) |
 | `bootstrap-config.kv.example` | Template documenting all config variables |
 | `images-manifest.kv.example` | Template for `--flash download` image manifest |
 | `bmc-manifest.kv.example` | Template for A0 BMC firmware check/upgrade |
-| `tests/run-ci.sh` | CI test runner — Suites 1+2 (Phase A dry-run + mock), no hardware required |
-| `tests/run-hardware.sh` | Hardware test runner — Suite 3, full Phase A cluster cycles |
+| `tests/run-ci.sh` | CI test runner — Suites 1+2 (bring-up dry-run + mock), no hardware required |
+| `tests/run-hardware.sh` | Hardware test runner — Suite 3, full bring-up/teardown cycles |
 | `tests/check-cluster.sh` | Suite 4: 19-check cluster health test; `--quick` skips pod-pull + roundtrip checks |
 | `docs/` | PREREQUISITES, TROUBLESHOOTING, and status documents |
 | `docs/adr/` | Architecture Decision Records |
@@ -191,7 +191,7 @@ Ethernet, serial consoles).
 
 ---
 
-### Expect Script Stages ("Phase A")
+### Expect script stages (board bring-up — the script's `--phase A`)
 
 | Stage | Name | What it does |
 |-------|------|--------------|
@@ -226,11 +226,11 @@ including what's genuinely live-tested vs. dry-run/mock-only.
 
 ## Teardown
 
-`teardown-cluster.exp` reverses Phase A cleanly — useful for scratch-reinstall testing or decommissioning. It resets every node to a re-bootstrappable state (default credentials, no registry, hostnames reset) and powers them all off.
+`teardown-cluster.exp` reverses the board bring-up cleanly — useful for scratch-reinstall testing or decommissioning. It resets every node to a re-bootstrappable state (default credentials, no registry, hostnames reset) and powers them all off.
 
 ### Why a separate teardown script?
 
-The bootstrap is intentionally forward-only (idempotent stages, check→act). Teardown runs in the opposite direction with different concerns — it must locate nodes even when IPs have drifted, and it must succeed even if parts of Phase A were never completed.
+The bootstrap is intentionally forward-only (idempotent stages, check→act). Teardown runs in the opposite direction with different concerns — it must locate nodes even when IPs have drifted, and it must succeed even if parts of the bring-up were never completed.
 
 ### Teardown stages
 
@@ -256,7 +256,7 @@ Usage, flags, and the full reinstall cycle are covered in
 
 This project intentionally splits responsibilities between bootstrap automation (imperative, with Expect) and cluster orchestration (declarative, with Kubernetes + GitOps).
 
-### Where Expect ends (Phase A)
+### Where Expect ends (board bring-up)
 
 The Expect script (`bootstrap-turingpi-cluster.exp`) is only responsible for one-time or out-of-band setup that cannot be declaratively managed inside Kubernetes:
 
@@ -271,21 +271,34 @@ The Expect script (`bootstrap-turingpi-cluster.exp`) is only responsible for one
 
 Once the registry is reachable and each node has a hostname and working SSH, the cluster is considered bootstrapped. At this point, Expect stops — its job is done.
 
-### Where Kubernetes / GitOps begins (Phase B and onwards)
+### Where Kubernetes / GitOps begins (cluster orchestration)
 
-Everything after bootstrap is handled declaratively via Kubernetes manifests and GitOps tooling:
+Everything after bring-up is handled declaratively via Kubernetes manifests
+and GitOps tooling. What this stage delivers, all live today:
 
-**Phase B:** Persistent registry with TLS + basic auth, k3s, NVMe storage, Tailscale mesh, monitoring. **Complete** as of 2026-05-11. See [docs/ROADMAP.md](docs/ROADMAP.md).
+- **Cluster core**: k3s, a persistent TLS + basic-auth registry on NVMe,
+  the `local-ssd` StorageClass, resource policy, and capability labels
+  (NPU/NVMe as node labels, not hostname pins).
+- **Network**: Tailscale mesh across all nodes + subnet-routed cluster
+  services + the Tailscale k8s operator for service exposure.
+- **GitOps**: Flux reconciling `gitops/` from this repo via a read-only
+  deploy key.
+- **Workloads**: Ollama per NVMe node, kube-prometheus-stack monitoring
+  (Grafana on the Tailnet), Whisper STT charts (CPU and NPU paths incl.
+  the KV-cache decoder), the KEDA + Redis job queue, and the
+  focus-switching demo.
+- **Self-healing**: the watchdog layers described above.
 
-**Phase C:** Local registry mirror + sync from laptop, IP resilience (static DHCP or CoreDNS), cloud expansion notes. Not started.
-
-**Phase D:** Multi-agent workloads, Ollama per node, observability. **D-01 (Ollama) + D-04 (Prometheus + Grafana) complete.** (Agent workloads are consumer-owned — this repo doesn't ship or deploy any itself.) RKNN NPU inference validated on node1 — Whisper `medium` STT container images built and benchmarked, 2026-06-16; end-to-end chart validated on hardware (both CPU and RKNN paths), 2026-08-14. GitOps (B-04) complete. W-03 (KV-cache decoder) done 2026-08-14; the job-queue boundary (E-01, ADR-0028/0029) and the focus-switching demo landed 2026-08-15.
+Agent workloads are deliberately consumer-owned — this repo doesn't ship
+or deploy any itself; they live upstream of the job queue. Future work
+(registry mirroring, IP resilience, cloud federation, and more) is in
+[the backlog](docs/backlog/BACKLOG.md).
 
 Recommended workflow:
 1. Build & push images from CI/CD into the cluster-local registry
 2. Describe desired workloads (Deployments, Services, Ingress) using Helm or Kustomize
 3. Commit to Git (platform repo)
-4. Argo CD / Flux continuously reconciles cluster state to match the repo
+4. Flux continuously reconciles cluster state to match the repo
 5. Promotions between environments = pull requests, not manual commands
 
 ### Why this split?
@@ -294,7 +307,7 @@ Expect excels at scripting fragile, one-time, interactive steps (BMC control, in
 
 Kubernetes/GitOps excels at continuously reconciling declarative state inside the cluster.
 
-Trying to use Expect inside the cluster would create snowflake states and drift. Conversely, trying to use Helm/Argo to flash USB images or reset BMC power would be impossible.
+Trying to use Expect inside the cluster would create snowflake states and drift. Conversely, trying to use Helm/Flux to flash USB images or reset BMC power would be impossible.
 
 By drawing the line here, the system is reproducible from bare metal up through workloads:
 - **Rerun Expect** = fresh cluster baseline
@@ -337,19 +350,21 @@ Supporting services (API gateway, vector DB, queue, metrics) are stateless or di
 | Node | Hostname | Role |
 |------|----------|------|
 | 1 | `rk1-node1` | k3s control plane + registry |
-| 2 | `rk1-node2` | Future LLM agent |
-| 3 | `rk1-node3` | Future LLM agent |
-| 4 | `rk1-node4` | RAG / vector DB / supporting infra |
+| 2 | `rk1-node2` | LLM inference (Ollama) + NPU jobs |
+| 3 | `rk1-node3` | LLM inference (Ollama) + NPU jobs |
+| 4 | `rk1-node4` | Supporting infra / CPU-only jobs (no NVMe) |
 
 ### Tool Roles
 
 | Tool | Role in this project |
 |------|---------------------|
-| Expect | Phase A only: drive interactive SSH, handle boot timing, discover IPs |
+| Expect | Board bring-up only: drive interactive SSH, handle boot timing, discover IPs |
 | k3s | Lightweight Kubernetes (single binary, SQLite, ARM64 native) |
-| Helm | Deploy Phase B registry and future workloads |
-| Argo CD / Flux | GitOps controller — reconcile cluster to Git state continuously |
-| Ollama | LLM inference runtime on each agent node |
+| Helm | Deploy the registry and workload charts |
+| Flux | GitOps controller — reconcile cluster to Git state continuously |
+| KEDA + Redis | The job queue: typed lists, scale-from-zero per job type |
+| Tailscale | Mesh networking, subnet-routed cluster access, service exposure |
+| Ollama | LLM inference runtime on each NVMe node |
 | Traefik | Ingress (bundled with k3s) |
 | Prometheus + Grafana | Observability — Grafana exposed on Tailnet |
 
@@ -357,7 +372,7 @@ Supporting services (API gateway, vector DB, queue, metrics) are stateless or di
 
 ## Project Status
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for phase-by-phase status and [docs/OPERATIONS.md](docs/OPERATIONS.md) for hardware/software inventory.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for current status and [docs/OPERATIONS.md](docs/OPERATIONS.md) for hardware/software inventory.
 
 Open work items are tracked in [docs/backlog/BACKLOG.md](docs/backlog/BACKLOG.md).
 
