@@ -319,28 +319,36 @@ request (warm model), making larger models impractical regardless of RAM.
 Validated 2026-05-12: llama3.2:1b on CPU produces unreliable structured
 output (a falsely-confident result on two clearly-mismatched test inputs);
 the model is too small to reliably follow multi-step evaluation
-instructions. A 7B model on NPU is the minimum viable path.
+instructions. A 7B-class model is the estimated minimum for reliable
+structured output — and the measured numbers below say it does not have
+to be on the NPU.
 
-**Why RAM is likely not the bottleneck (estimates, unmeasured)**  
-A 13B Q4 model's ~7 GB of weights fits comfortably in the 32 GB per node
-(plus KV cache/activations). The expected limit is compute throughput
-(matrix multiply) and memory bandwidth per token, not capacity. CPU NEON
-SIMD gives ~3–5 tok/s for 1B; 13B would be ~0.3 tok/s (~10 min/response).
-The NPU dedicates silicon to matmul — vendor claims suggest 5–15× faster,
-but this cluster's measured FP16 matmul ceiling (~230 GFLOP/s,
-`NPU-DATASHEET.md`) says: measure before believing.
+**Measured reality (one RK1 node) — the bar this item must clear**  
+- CPU (Ollama, 2026-08-16): `llama3.2:1b` **14.4 tok/s**; `llama2:13b`
+  Q4 (7.4 GB) **2.6 tok/s** — sub-linear scaling; an earlier ~0.3 tok/s
+  extrapolation for 13B was ~9× too pessimistic. RAM is not the
+  bottleneck (32 GB/node).
+- NPU (rkllama, 2026-06): Llama 3.1 8B W8A8 **~1.6 tok/s** — the measured
+  NPU path currently loses to the measured CPU path at a larger model.
 
-**Model targets (estimated)**
+So this item's goal is not "run LLMs on the NPU" (done once) but "beat
+2.6 tok/s at 13B-class quality" — given the measured FP16 matmul ceiling
+(~230 GFLOP/s, `NPU-DATASHEET.md`) that may not be achievable on this
+silicon; measure before believing any vendor tok/s figure.
 
-| Model     | INT4 size | Fits NPU SRAM? | Est. tok/s (NPU) |
+**Model targets (vendor-estimated NPU tok/s — treat with skepticism: the
+one local NPU measurement, 8B at ~1.6 tok/s, came in far below this
+table's range)**
+
+| Model     | INT4 size | Fits NPU SRAM? | Vendor-est. tok/s (NPU) |
 |-----------|-----------|----------------|------------------|
 | Llama 3.2 1B | 0.7 GB | Partially | 20–40 |
 | Llama 3.2 3B | 2 GB   | No — DRAM  | 8–15  |
 | Llama 3.1 7B | 4 GB   | No — DRAM  | 3–6   |
 
-7B is the minimum for reliable structured reasoning. 6 TOPS on DRAM-backed
-layers still beats CPU by a large margin because the compute units are faster,
-not because weights fit on-chip.
+7B-class is the estimated minimum for reliable structured reasoning. The
+"NPU beats CPU by a large margin" assumption did not survive measurement —
+see the table above the conversion pipeline.
 
 **Conversion pipeline**
 

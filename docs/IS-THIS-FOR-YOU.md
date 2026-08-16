@@ -65,12 +65,17 @@ transcript out, on both paths:
   not in the vendor runtime — the full story, including the retraction, is
   in [RKNN-SA-KV-DECODER-BUG.md](RKNN-SA-KV-DECODER-BUG.md).)
 
-**Small LLM inference via Ollama** (CPU-only; NPU LLM support is
-unexplored, tracked as [R-01](backlog/BACKLOG.md)) works, but "works" is
-doing a lot of the work in that sentence: `llama3.2:1b` produces unreliable
-structured output on real evaluation tasks — too small to reliably follow
-multi-step instructions. Nothing larger has been validated on this hardware
-yet; 7B is the *estimated* practical minimum for reliable output, untested.
+**LLM inference via Ollama** (CPU-only — llama.cpp has no RK3588 NPU
+backend; an NPU LLM path exists but its one local benchmark lost to the
+CPU, so it's parked as [R-01](backlog/BACKLOG.md)) is faster than the
+"small models only" framing suggests: measured on one RK1, `llama3.2:1b`
+generates at **14.4 tok/s** and a 13B Q4 model (7.4 GB) at **2.6 tok/s**
+— the latter usable for queue-batch work (a 100-token answer in ~40 s).
+Output *quality* is a separate axis: `llama3.2:1b` produces unreliable
+structured output on real evaluation tasks (too small for multi-step
+instructions), and larger models' quality-per-task hasn't been validated
+here yet — but the old assumption that 13B-class would be
+throughput-prohibitive on CPU was measured away.
 
 **General Kubernetes/GitOps platform work** is genuinely solid: k3s, Helm,
 Flux GitOps, capability-based scheduling (NPU/NVMe as node labels instead of

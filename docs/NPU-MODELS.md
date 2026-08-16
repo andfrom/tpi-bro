@@ -6,25 +6,43 @@ automation scripts.
 
 ---
 
-## Background
+## Background — which engine runs on which silicon
 
-Ollama does not use the RK3588 NPU — it falls back to CPU-only inference.
-The rknn-llm toolkit (Rockchip official) exposes the NPU for LLM inference;
-community/vendor figures claim 5–40 tok/s depending on model size, versus
-~1–5 tok/s on CPU — **none of this is measured on this cluster yet**
-(tracked as R-01), and this project's measured NPU numbers (matmul ~230
-GFLOP/s FP16, `NPU-DATASHEET.md`) suggest treating vendor tok/s claims
-with the same skepticism as the 6 TOPS figure.
+Two different inference stacks exist on this cluster, and every number in
+this doc is labeled with its engine + device, because they are easy to
+conflate:
 
-**Memory architecture:** The NPU uses the same LPDDR5 DRAM as the CPU
-(unified memory); the small on-NPU SRAM is a per-layer compute buffer, not
-a model-size limit. With 32 GB per module, a 13B Q4 model's ~7 GB of
-weights fits *in RAM* by arithmetic — but weight size is not the whole
-footprint (KV cache, activations, runtime buffers), and the largest model
-actually loaded on this stack so far is the 1.77 GB Whisper large-v3
-decoder. Treat anything bigger as unvalidated until R-01 runs.
+| Engine | Device | Status on this cluster |
+|---|---|---|
+| **Ollama** (llama.cpp) | **CPU only** — no RK3588 NPU backend exists | Deployed on NVMe nodes; measured below |
+| **rkllama / rknn-llm** (Rockchip official) | **NPU** | Benchmarked once (8B W8A8, 2026-06, table below); not currently deployed — R-01 |
+| faster-whisper (CTranslate2) | **CPU only** | Validated end-to-end (`charts/whisper/`) |
+| RKNN Whisper (rknn-toolkit-lite2) | **NPU** | Validated end-to-end incl. the SA-KV decoder (`charts/whisper/`) |
 
-**Supported model families (rknn-llm 1.1.x):**
+**Measured LLM throughput on this cluster (one RK1 node):**
+
+| Model | Engine | Device | Generation | Prompt eval | Measured |
+|---|---|---|---|---|---|
+| `llama3.2:1b` Q4 | Ollama | **CPU** | **14.4 tok/s** | 116 tok/s | 2026-08-16 |
+| `llama2:13b` Q4 (7.4 GB) | Ollama | **CPU** | **2.6 tok/s** | 10.1 tok/s | 2026-08-16 |
+| Llama 3.1 8B W8A8 g128 | rkllama | **NPU** | ~1.6 tok/s | ~13.5 tok/s | 2026-06 (§Observed performance below) |
+
+The honest headline: **the measured CPU path currently beats the measured
+NPU path for LLMs** — a 13B on plain CPU out-generates an 8B on the NPU.
+(Consistent with the measured NPU matmul ceiling of ~230 GFLOP/s FP16,
+`NPU-DATASHEET.md` — the "6 TOPS" marketing figure does not apply to
+transformer decode.) CPU scaling is also strongly sub-linear: 13× the
+parameters cost only ~5.6× the speed, so an earlier ~0.3 tok/s linear
+extrapolation for 13B was ~9× too pessimistic.
+
+**Memory architecture (shared by both devices):** the NPU uses the same
+LPDDR5 DRAM as the CPU (unified memory); the small on-NPU SRAM is a
+per-layer compute buffer, not a model-size limit. With 32 GB per module, a
+13B Q4's 7.4 GB of weights loads and runs (measured, CPU path). The
+largest *NPU* artifact loaded so far is the 1.77 GB Whisper large-v3
+decoder.
+
+**Model families supported by rknn-llm 1.1.x (the NPU LLM path):**
 Llama 2/3/3.1/3.2, Qwen2/2.5, Phi-2/3/3.5, Gemma, MiniCPM, InternLM2.
 
 ---
