@@ -186,7 +186,7 @@ curl -s -X POST http://localhost:8080/api/chat \
        "messages":[{"role":"user","content":"hello"}],"stream":false}'
 ```
 
-### Observed performance (RK3588, 32 GB, W8A8 g128, hybrid-ratio 1.0)
+### Observed performance — NPU via rkllama (8B W8A8 g128, hybrid-ratio 1.0, 2026-06)
 
 - First token latency: ~8–9s (includes model load on first request)
 - Generation throughput: ~1.6 tok/s
