@@ -11,7 +11,7 @@ state.
 
 ## [Unreleased]
 
-## [0.1.0] — TBD (first public release)
+## [0.1.0] — 2026-08-16 (first public release)
 
 ### Added
 
