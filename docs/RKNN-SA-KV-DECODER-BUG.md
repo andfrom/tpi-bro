@@ -166,53 +166,59 @@ projection came from a deleted script and does not reproduce through
 `rknnlite.inference()`; a real 1.5× likely requires the zero-copy
 pass-through C-API path.
 
-## Postscript: the large-v3 attempt (2026-08-15)
+## Postscript: the large-v3 "init runaway" — RETRACTED (it was our own harness)
 
-With the shim proven at medium, the same pipeline was run for large-v3
-(32 layers / 20 heads / 1280 d_model / 128 mels): export and conversion
-succeeded on-cluster (1.77 GB `.rknn`, simulator pipeline OK — note the
-driver needs `num_languages=100` plumbed to the tokenizer or the task
-token shifts by one). On real hardware it never got as far as this
-document's bug: **`rknn_init` itself is pathological at this model size.**
+**Final status (2026-08-16): large-v3 SA-KV works on the hardware, unchanged.**
+The production 1.77 GB decoder initializes in 1.8 s at 3.87 GB peak (the
+normal ~2.2× overhead), validates at **cosine 0.999970** with fingerprint
+verdict **"none dead / caches DELIVERED"**, and produces a word-perfect
+real-audio transcript at **~3.6 s/step** (23 steps; vs ~2.0 s/step for
+medium). Encoder: 26.9 s per 30 s window; xa-KV precompute 2.7 s.
 
-- Uncapped, initialization consumed effectively all of the RK1's 32 GB and
-  hard-wedged the node at kernel level: ping answered, but sshd and the
-  k8s API were dead for 35+ minutes, the system OOM killer never
-  completed (the Mali driver's OOM notifier logged `0 kB` reclaimable),
-  and recovery required a BMC power-cycle.
-- Re-run under a 20 GB cgroup cap, the init was OOM-killed ~30 s in at
-  **20.9 GB anon-RSS — a >12× blowup over the 1.77 GB model file**
-  (kernel evidence: `Memory cgroup out of memory: Killed process …
-  total-vm:21509288kB, anon-rss:20928968kB`).
-- As with the input-loss bug: zero RKNPU or runtime log lines, and the
-  x86 simulator is immune (the same artifact passes the simulator
-  pipeline).
+What this section previously claimed — an `rknn_init` runaway allocating
+>11× model size, "structure-sensitive, medium is the on-device ceiling" —
+was **wrong, and the bug was ours**. This doc now carries two retractions,
+and the second one is the better lesson:
 
-Verdict: **medium is the practical SA-KV model-size ceiling on
-librknnrt 2.3.2 / 32 GB RK1s.** The medium decoder initializes and runs
-in production; the 1.77 GB large-v3 decoder cannot be initialized at
-all. Operational lesson folded into `HARDWARE-FIRMWARE-ISSUES.md`: never
-run RKNN workloads without a memory cap — a runaway init inside a capped
-container costs you the container; uncapped, it costs you the node.
+**What actually happened.** `real_hw_check.py` loaded per-layer
+cross-attention tensors from the test-data `.npz` as
+`[d["xa_kvs"][i] for i in range(64)]`. NumPy's `NpzFile.__getitem__`
+re-reads and re-materializes the **full array on every subscript**, and
+each `[i]` slice is a view that pins its own private copy of the whole
+491 MB base — 64 iterations ≈ **31 GB**, before the RKNN runtime was ever
+touched. On a 32 GB node: the kernel-starving wedge (uncapped) and the
+20.9 GB cgroup kills (capped) that we attributed to `rknn_init`. Medium
+escaped by luck of scale: its testdata bomb is ~14 GB, which fits — which
+is exactly why "medium works, large-v3 doesn't" looked like a model-size
+effect.
 
-**Refinement (same day): it is not model size.** Two capped init-only
-probes (peak RSS via `ru_maxrss`, same runtime/driver, same node):
+**How the false diagnosis survived a day.** Every observation was
+consistent with an init defect: the python process really did balloon
+while "initializing," the kill really did land at the cap, and the
+simulator really was immune (it never runs this harness). The three
+controls that unwound it, in order:
+1. Same-size controls (June 1.80 GB decoder, medium SA-KV) initialized at
+   ~2.1–2.2× — killed the *size* hypothesis.
+2. A depth sweep (1/2/4/8/16/20/24/28/30/**32** layers, plus shim-off and
+   reduced-context controls) initialized flat at ~2.0–2.2× — killed the
+   *depth and structure* hypotheses, including the full 32-layer graph.
+3. With the graph fully exonerated, only the harness remained — and a
+   staged, per-stage RSS bisection caught the process dying **inside
+   `np.load` handling**, before any RKNN call.
 
-| Model | Size | Init result | Peak RSS | Overhead |
-|---|---|---|---|---|
-| medium SA-KV step | 0.94 GB | OK, 1.2 s | 2.10 GB | ~2.2× |
-| June large-v3 cached-xa decoder | **1.80 GB** | OK, 2.0 s | 3.83 GB | ~2.1× |
-| large-v3 SA-KV step | 1.77 GB | killed at 20 GB cap, ~30 s, not done | >20.9 GB | **>11×, unbounded?** |
+**Lessons, added to the ones above:**
+- The instrument can be the defect. Before indicting a runtime for a
+  resource pathology, run the *narrowest* possible probe (here: an
+  init-only load with no test-data path at all) — we ran that probe on
+  every artifact *except* the accused one.
+- `npz["key"][i]` in a loop is a memory bomb: materialize once
+  (`arr = d["key"]`), then slice.
+- The memory-capped-container rule (below) is what turned a node-wedging
+  bug into a diagnosable one — it stays.
 
-Normal `rknn_init` overhead is ~2× at every size tested, including a
-model *larger* than the failing one. The runaway is specific to the
-**SA-KV step graph at large-v3 dimensions** — candidate drivers: ~130
-graph I/O tensors, 64 in-model `Unsqueeze` ops (the input shim), the
-concat-at-449 static shapes, or an interaction between them and the
-larger head count/width. This mirrors the main bug's lesson: it looked
-like a scale wall and is actually a structure-sensitive defect — which is
-good news, because structure-sensitive defects have workarounds. The
-experiment ladder to localize it (layer-count sweep via
-`minimal_repro_nlayer.py --export-rknn`, shim-on/off control, n_ctx
-sweep, C-API memory instrumentation) is tracked as **W-05** in the
-backlog.
+The `HARDWARE-FIRMWARE-ISSUES.md` row for this incident is retained in
+retracted form: the *operational* lessons (cap RKNN workloads; the wedge
+and its BMC recovery were real events) survive the retraction of the
+runtime indictment. The upstream bug-report draft for this was deleted
+before ever being filed — the "don't post until verified on the public
+repo" gate did its job.

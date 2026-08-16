@@ -57,12 +57,13 @@ transcript out, on both paths:
   [RKNN-SA-KV-DECODER-BUG.md](RKNN-SA-KV-DECODER-BUG.md)). It's wired
   into `charts/whisper/` (`rknn.decoder: sa-kv`), but even so, the honest
   recommendation for anything latency-sensitive is still CPU, not NPU.
-  And today's ceiling is hard: `medium` is the largest model whose KV-cache
-  NPU decoder can even *initialize* — large-v3's SA-KV decoder converts
-  fine but `rknn_init` runs away (>20 GB for a 1.77 GB model, while a
-  same-size non-SA-KV large-v3 decoder inits normally at 3.8 GB) and,
-  uncapped, wedges the entire node at kernel level until a BMC power-cycle
-  (see [HARDWARE-FIRMWARE-ISSUES.md](HARDWARE-FIRMWARE-ISSUES.md)).
+  Even `large-v3` runs end-to-end on the NPU (validated: word-perfect
+  transcript, ~3.6 s/step, 26.9 s encode per 30 s window) — batch-quality
+  transcription at the highest model quality, nowhere near real time. (An
+  earlier claim that large-v3 "cannot even initialize" was retracted: the
+  20+ GB allocation that wedged a node was a bug in our own test harness,
+  not in the vendor runtime — the full story, including the retraction, is
+  in [RKNN-SA-KV-DECODER-BUG.md](RKNN-SA-KV-DECODER-BUG.md).)
 
 **Small LLM inference via Ollama** (CPU-only; NPU LLM support is
 unexplored, tracked as [R-01](backlog/BACKLOG.md)) works, but "works" is

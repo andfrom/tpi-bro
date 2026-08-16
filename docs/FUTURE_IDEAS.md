@@ -80,10 +80,10 @@ lessons.
   end-to-end gain of the SA-KV decoder is **~2.5×** (2.0 s/step vs 5.0 s/step),
   after root-causing a genuine runtime bug on the way. Full story:
   `RKNN-SA-KV-DECODER-BUG.md`.
-- **Large-v3: conversion works, on-device init does not.** `rknn_init` runs
-  away on the large-v3 SA-KV graph (>20 GB for a 1.77 GB model; a same-size
-  non-SA-KV decoder inits at 3.8 GB) — medium is the on-device SA-KV ceiling
-  for now; localization tracked as W-05. See `HARDWARE-FIRMWARE-ISSUES.md`.
+- **Large-v3: works end-to-end on the NPU** (2026-08-16; ~3.6 s/step,
+  word-perfect transcript). An interim "cannot initialize" claim was
+  retracted — the blocker was a test-harness memory bug, not the runtime;
+  see `RKNN-SA-KV-DECODER-BUG.md` §Postscript.
 - **NPU device node: identified** (`/dev/dri/card1`, 2026-08-14) — but
   de-privileging is still blocked on a closed-source runtime issue; see
   ADR-0023 and `HARDWARE-FIRMWARE-ISSUES.md`.
@@ -94,5 +94,6 @@ lessons.
   no RK3588 NPU backend in Ollama or llama.cpp as of 2026-06-16. Track upstream; do not
   wait for it. The `rknn-toolkit2` path (convert model → RKNN → run via rknn-toolkit-lite2)
   is the viable route for any model where a conversion script exists (R-01).
-- **KBLab Swedish fine-tune** (`KBLab/kb-whisper-large`) — blocked on the
-  large-v3-size init issue above; a medium-size fine-tune would clear it.
+- **KBLab Swedish fine-tune** (`KBLab/kb-whisper-large`) — unblocked now
+  that large-v3-size models are proven on-device; needs its own
+  conversion + validation pass.

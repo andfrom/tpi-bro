@@ -4,8 +4,11 @@ The cluster recovers autonomously from hung, crashed, and half-booted
 nodes. Built as independent layers (originally backlog item C-04, completed
 2026-08-15/16), each validated with a live destructive test. Both incident
 classes that motivated the design happened for real on 2026-08-15: a
-runaway `rknn_init` kernel-wedged node1 (ping alive, sshd/API dead, OOM
-killer stuck — manual BMC power-cycle needed), and node2's warm reboot hit
+runaway allocation kernel-wedged node1 (ping alive, sshd/API dead, OOM
+killer stuck — manual BMC power-cycle needed; the allocator was later
+traced to our own test harness, not the NPU runtime — see
+`RKNN-SA-KV-DECODER-BUG.md` §Postscript — which changes nothing about the
+recovery need), and node2's warm reboot hit
 flaky PCIe link training (booted "healthy", NVMe absent, never reachable).
 
 | Layer | Catches | Mechanism | Validated by |

@@ -9,12 +9,20 @@ automation scripts.
 ## Background
 
 Ollama does not use the RK3588 NPU — it falls back to CPU-only inference.
-The rknn-llm toolkit (Rockchip official) exposes the NPU for LLM inference
-and can deliver 5–40 tok/s depending on model size, versus ~1–5 tok/s on CPU.
+The rknn-llm toolkit (Rockchip official) exposes the NPU for LLM inference;
+community/vendor figures claim 5–40 tok/s depending on model size, versus
+~1–5 tok/s on CPU — **none of this is measured on this cluster yet**
+(tracked as R-01), and this project's measured NPU numbers (matmul ~230
+GFLOP/s FP16, `NPU-DATASHEET.md`) suggest treating vendor tok/s claims
+with the same skepticism as the 6 TOPS figure.
 
-**Memory architecture:** The NPU uses the same LPDDR5 DRAM as the CPU (unified
-memory). The 6 MB NPU SRAM is a per-layer compute buffer, not a model size
-limit. With 32 GB per RK1 module, models up to 13B Q4 (~7 GB) fit easily.
+**Memory architecture:** The NPU uses the same LPDDR5 DRAM as the CPU
+(unified memory); the small on-NPU SRAM is a per-layer compute buffer, not
+a model-size limit. With 32 GB per module, a 13B Q4 model's ~7 GB of
+weights fits *in RAM* by arithmetic — but weight size is not the whole
+footprint (KV cache, activations, runtime buffers), and the largest model
+actually loaded on this stack so far is the 1.77 GB Whisper large-v3
+decoder. Treat anything bigger as unvalidated until R-01 runs.
 
 **Supported model families (rknn-llm 1.1.x):**
 Llama 2/3/3.1/3.2, Qwen2/2.5, Phi-2/3/3.5, Gemma, MiniCPM, InternLM2.

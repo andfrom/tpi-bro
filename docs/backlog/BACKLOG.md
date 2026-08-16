@@ -248,43 +248,9 @@ Work: create the HF model repo, upload encoder/decoder + manifest per
 model, pin hashes in the tagx/tpi-bro manifests, add hash verification to
 the model-fetch path, document in the whisper chart README.
 
-Scope note (2026-08-15): **medium only.** large-v3's SA-KV decoder
-converts but cannot be initialized on the hardware — `rknn_init` runs
-away (>20.9 GB measured for the 1.77 GB decoder; a same-size non-SA-KV
-decoder inits at 3.8 GB) and, uncapped, wedges the node (see
-`HARDWARE-FIRMWARE-ISSUES.md`, W-05). Don't publish artifacts users
-can't run.
-
-### W-05: Localize the rknn_init runaway (discovery ladder + workaround)
-
-The large-v3 SA-KV init runaway is structure-sensitive, not
-size-sensitive (measured: normal init is ~2.1–2.2× model size, including
-a 1.80 GB control; the failing graph exceeds 11× without completing —
-`RKNN-SA-KV-DECODER-BUG.md` §Postscript). Structure-sensitive means a
-workaround likely exists, and every probe doubles as evidence for the
-upstream report (`scratch/upstream-drafts/rknn-init-memory-blowup.md`).
-Ladder, cheapest first — every run memory-capped (20 GB) + MemAvailable
-watchdog, per the hard-won operational rule:
-
-1. **Layer sweep**: `minimal_repro_nlayer.py --export-rknn` at large-v3
-   dims for 1/2/4/8/16 layers → init-peak-RSS curve. Superlinear growth
-   or a step localizes the driver (I/O count scales with layers).
-2. **Shim on/off control** at the same depth: is the in-model `Unsqueeze`
-   implicated (bug-interaction with the NC1HWC2 workaround), or does the
-   4D variant blow up too?
-3. **n_ctx sweep** (449 → 225 → 113): if the concat shapes drive it,
-   shrinking context bounds init — and doubles as workaround (b).
-4. **C-API instrumentation**: `rknn_query(RKNN_QUERY_MEM_SIZE)` +
-   `RKNN_FLAG_MEM_ALLOC_OUTSIDE` to see *what* it allocates; shares a
-   harness with the zero-copy FP16-feeds exploration (same C-API work).
-
-Workaround candidates, in order of promise: (a) split decoder (2×16 —
-if growth is superlinear in depth, halving layers may bring init into
-the ~2× regime; the split mechanics were already proven during the W-03
-false-trail phase (see `RKNN-SA-KV-DECODER-BUG.md`)); (b) reduced n_ctx export; (c) **large-v3-turbo** —
-its 4-layer distilled decoder is likely the pragmatic destination for
-large-v3-quality STT on this hardware regardless (encoder already
-proven: the 1.36 GB large-v3 encoder inits fine).
+Scope: **medium and large-v3** — both fully validated on hardware
+(large-v3: cosine 0.99997, fingerprint-verified, ~3.6 s/step transcript;
+2026-08-16).
 
 ---
 
@@ -355,11 +321,14 @@ output (a falsely-confident result on two clearly-mismatched test inputs);
 the model is too small to reliably follow multi-step evaluation
 instructions. A 7B model on NPU is the minimum viable path.
 
-**Why RAM is not the bottleneck**  
-A 13B Q4 model (~7 GB) fits in 16 GB per node. The limit is compute throughput
-(matrix multiply) and memory bandwidth per token, not capacity. CPU NEON SIMD
-gives ~3–5 tok/s for 1B; 13B would be ~0.3 tok/s (~10 min/response). The NPU
-dedicates silicon to matrix multiply — same model should run 5–15× faster.
+**Why RAM is likely not the bottleneck (estimates, unmeasured)**  
+A 13B Q4 model's ~7 GB of weights fits comfortably in the 32 GB per node
+(plus KV cache/activations). The expected limit is compute throughput
+(matrix multiply) and memory bandwidth per token, not capacity. CPU NEON
+SIMD gives ~3–5 tok/s for 1B; 13B would be ~0.3 tok/s (~10 min/response).
+The NPU dedicates silicon to matmul — vendor claims suggest 5–15× faster,
+but this cluster's measured FP16 matmul ceiling (~230 GFLOP/s,
+`NPU-DATASHEET.md`) says: measure before believing.
 
 **Model targets (estimated)**
 

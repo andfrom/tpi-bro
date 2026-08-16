@@ -57,15 +57,17 @@ state.
 **NPU / Whisper**
 - Whisper STT chart (`charts/whisper/`) with CPU (faster-whisper) and
   RKNN NPU paths, including the self-attention KV-cache decoder (~2.5×
-  measured over the naive decoder) and fail-fast template guards.
+  measured over the naive decoder; validated up to large-v3) and
+  fail-fast template guards.
 - NPU characterization: measured datasheet (FP16/INT8 kernel ceilings,
   thermal behavior), reusable benchmark harness (`tools/npu-bench/`),
   and honest end-to-end Whisper numbers.
 - Hardware/firmware issue index with root-caused vendor-stack bugs
   (silent NC1HWC2 input loss — worked around with an in-model shim;
-  INT8 transformer collapse; `rknn_init` runaway on a specific graph
-  shape; warm-reboot PCIe link-training flake) and a vendor-response
-  tracker.
+  INT8 transformer collapse; warm-reboot PCIe link-training flake), a
+  vendor-response tracker, and the project's visible-retractions record
+  (including one where the accused runtime turned out innocent and the
+  bug was our own test harness).
 
 **Tests / CI**
 - Six suites: offline dry-run + mock/fault-injection (31 tests, CI),

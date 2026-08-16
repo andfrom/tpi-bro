@@ -60,8 +60,9 @@ scenario`.
 
 An unattended cluster is only as good as its worst night. tpi-bro recovers
 autonomously from the failures this hardware actually produced during
-development: a kernel-starved node (a runaway NPU-runtime allocation ate
-all 32 GB — the on-SoC hardware watchdog now resets that in **~50 s**), a
+development: a kernel-starved node (a runaway allocation — ultimately a
+bug in our own test harness — ate all 32 GB; the on-SoC hardware watchdog
+now resets that in **~50 s**), a
 node that hangs unreachable (a BMC-resident watchdog probes every node's
 ssh banner and cold power-cycles after guarded thresholds — no boot loops
 by construction, a claim pinned by CI unit tests), and the sneakiest one: a node that boots "healthy" with

@@ -94,14 +94,13 @@ Whisper `medium` inference on the RK3588 NPU already works (see `docs/NPU-MODELS
 
 ## Immediate Next Steps
 
-1. **W-05: localize the `rknn_init` runaway** — large-v3's SA-KV decoder
-   *converts* fine (done 2026-08-15, incl. driver support) but on-device
-   init allocates >11× model size and cannot complete on a 32 GB node,
-   while a same-size non-SA-KV decoder inits normally — a
-   structure-sensitive defect, not a size wall. Layer/context/shim sweeps
-   underway; see `docs/RKNN-SA-KV-DECODER-BUG.md` §Postscript and W-05.
-2. **Open-source release** — audit done (leak sweep, docs, testing gaps);
-   remaining: docs sweep, CHANGELOG, history rewrite, tag.
+1. **Open-source release** — audit executed (leak sweep, docs, testing
+   gaps, CHANGELOG, history rewrite); remaining: purge-request
+   confirmation, version tag, flip.
+
+(W-05 closed 2026-08-16 with a retraction: the "rknn_init runaway" was a
+test-harness memory bug; large-v3 SA-KV is fully validated on hardware —
+`docs/RKNN-SA-KV-DECODER-BUG.md` §Postscript.)
 
 (Self-healing shipped 2026-08-15/16: on-SoC hardware watchdogs + a
 BMC-resident node watchdog with ssh + deep probes, validated by
