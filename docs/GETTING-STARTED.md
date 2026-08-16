@@ -12,14 +12,17 @@ including several that had only ever been dry-run before.
 
 ## What you'll end up with
 
-After Phase A: 4 named nodes (`rk1-node{1..4}`), SSH access by hostname, a
-temporary HTTP registry on `rk1-node1:5000`.
+After board bring-up (Step 3): 4 named nodes (`rk1-node{1..4}`), SSH access
+by hostname, a temporary HTTP registry on `rk1-node1:5000`.
 
-After Phase B: static IPs, SSH keys, k3s across all 4 nodes, a persistent
-TLS+auth registry, NVMe mounted at `/mnt/ssd` on nodes 1–3, Ollama.
+After cluster orchestration (Step 5, one command): static IPs, SSH keys,
+k3s across all 4 nodes, a persistent TLS+auth registry, NVMe mounted at
+`/mnt/ssd` on nodes 1–3, resource policy + capability labels, the Tailscale
+mesh (cluster reachable off-LAN), Flux GitOps, Ollama, Prometheus/Grafana
+monitoring, the KEDA+Redis job queue, and the self-healing watchdogs — with
+the 19-check health suite green.
 
-After Tailscale + application deployment: the cluster reachable off-LAN, and
-your own application images running on it.
+After Step 6: your own application images running on it.
 
 ---
 
@@ -88,7 +91,7 @@ an image already on the BMC's SD card), you can skip this — it's specifically 
 
 ---
 
-## Step 3 — Run Phase A (flash, name, network)
+## Step 3 — Board bring-up (flash, name, network)
 
 ```bash
 # Dry-run first — prints every action, touches nothing
@@ -127,60 +130,69 @@ curl http://rk1-node1:5000/v2/_catalog   # Phase A registry only — HTTP, ephem
 
 ---
 
-## Step 4 — Run Phase B (k3s + persistent registry + storage)
+## Step 4 — Tailscale account + credentials (manual)
 
-> **One-command alternative:** `./scripts/bootstrap-operational.sh` runs this
-> step AND everything after it (resource policy, capability labels, the full
-> Tailscale mesh, GitOps, Ollama, monitoring, the KEDA+Redis job queue, and
-> the self-healing watchdogs), ending with the cluster health
-> check green. It's staged and resumable (`--from`/`--to`/`--dry-run`), does a
-> preflight that lists every missing tool/credential up front, and pauses once
-> for the one manual action (approving Tailscale subnet routes in the admin
-> console). Steps 4–5 below describe the same ground piecewise, for running or
-> re-running things individually.
-
-```bash
-./scripts/bootstrap-phase-b.sh --dry-run   # preview
-./scripts/bootstrap-phase-b.sh             # real run — B0 → B2
-```
-
-**You'll be prompted twice**, both by design (no key-based auth exists yet at this
-point): once for the BMC root password (static IP config), once for the Ubuntu
-node password set during Phase A (SSH key distribution). Everything after B0 is
-unattended.
-
-NVMe handling is safe to re-run: `mount-ssd.sh` checks for an existing `ext4`
-filesystem before formatting anything, so a partial re-run (or re-running Phase B
-against nodes whose NVMe already has data from a prior run) won't wipe it.
-
-```bash
-./scripts/bootstrap-phase-b.sh --from B2_registry   # resume from a specific stage
-./scripts/bootstrap-phase-b.sh --check              # + runs the 19-check cluster health test
-```
-
-Credentials land in `~/.turingpi/credentials.kv` (mode 600, gitignored).
-
----
-
-## Step 5 — Tailscale (manual)
-
-This step is genuinely manual and can't be scripted — it needs your own Tailscale
-account:
+This part is genuinely manual and can't be scripted — it needs your own
+Tailscale account (free tier is fine):
 
 1. Create a Tailscale account and install it on your laptop.
 2. Generate an auth key from the [admin console](https://login.tailscale.com/admin/settings/keys) — reusable, appropriately scoped for however many nodes you're joining.
 3. Put it in `~/.turingpi/credentials.kv` as `TAILSCALE_AUTH_KEY=...`.
 4. Also add `TAILSCALE_OAUTH_CLIENT_ID` / `TAILSCALE_OAUTH_CLIENT_SECRET` (from a separate OAuth client in the admin console) — used by the Kubernetes operator, not the per-node join.
-5. Run:
-   ```bash
-   ./scripts/install-tailscale.sh          # per-node join, uses TAILSCALE_AUTH_KEY
-   ./scripts/setup-subnet-router.sh        # advertise pod/service CIDRs
-   ./scripts/setup-tailscale-operator.sh   # K8s operator, uses OAuth client
-   ```
-6. Approve the subnet routes in the Tailscale admin console (Machines → node1 → Edit route settings).
+5. Add `GRAFANA_ADMIN_PASSWORD=...` (your choice) for monitoring.
 
-Auth keys are typically single-use or short-lived — if you're redoing this after a
-prior setup, generate a fresh one rather than reusing an old `TAILSCALE_AUTH_KEY`.
+Auth keys are typically single-use or short-lived — if you're redoing this
+after a prior setup, generate a fresh one rather than reusing an old
+`TAILSCALE_AUTH_KEY`. Don't worry about missing something: Step 5's
+preflight lists every missing tool and credential up front before touching
+anything.
+
+---
+
+## Step 5 — One command to operational
+
+```bash
+./scripts/bootstrap-operational.sh --dry-run   # preview every stage
+./scripts/bootstrap-operational.sh             # the real run
+```
+
+This takes the flashed cluster all the way: k3s + persistent TLS registry +
+NVMe storage, resource policy, capability labels, the full Tailscale mesh,
+Flux GitOps, Ollama, monitoring, the KEDA+Redis job queue, and the
+self-healing watchdogs — ending with the 19-check health suite green. It's
+staged and resumable (`--from`/`--to`), a failed stage prints the exact
+resume command, and it pauses exactly once for a manual action: approving
+the advertised subnet routes in the Tailscale admin console
+(Machines → node1 → Edit route settings) when it asks.
+
+Credentials land in `~/.turingpi/credentials.kv` (mode 600, gitignored);
+`REDIS_PASSWORD` is auto-generated on first run.
+
+### Prefer smaller steps?
+
+Every stage is its own script and can be run or re-run individually —
+useful for surgical re-runs on a built cluster:
+
+```bash
+./scripts/bootstrap-phase-b.sh             # just the cluster core: static IPs,
+                                           # SSH keys, k3s, registry (stages B0→B2)
+./scripts/bootstrap-phase-b.sh --from B2_registry   # resume a specific stage
+./scripts/apply-resource-policy.sh         # PriorityClasses + LimitRanges
+./scripts/label-node-capabilities.sh       # NPU/NVMe node labels
+./scripts/install-tailscale.sh             # per-node Tailscale join
+./scripts/setup-subnet-router.sh           # advertise pod/service CIDRs
+./scripts/setup-tailscale-operator.sh      # K8s operator (OAuth client)
+./scripts/install-gitops.sh                # Flux + deploy key + gitops/ sync
+./scripts/install-ollama.sh                # Ollama per NVMe node
+./scripts/install-monitoring.sh            # kube-prometheus-stack
+./scripts/install-jobqueue.sh              # KEDA + Redis job queue
+./scripts/enable-hw-watchdog.sh            # self-healing layer 1 (+ --rolling-reboot)
+./scripts/install-bmc-watchdog.sh          # self-healing layers 2+4 (on the BMC)
+```
+
+NVMe handling is safe to re-run: `mount-ssd.sh` checks for an existing `ext4`
+filesystem before formatting anything, so a partial re-run (or re-running
+against nodes whose NVMe already has data from a prior run) won't wipe it.
 
 ---
 
